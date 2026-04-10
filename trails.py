@@ -16,10 +16,12 @@ def initialise(directions):
     ants_int = int(config.get('trails', 'ants_int')) # initial no. of ants
     ants_locs = np.full(shape=(ants_int, 2), fill_value=nest_loc, dtype=np.uint32) # start all ants at the nest
     ants_dirs = np.array([random.choice(directions) for _ in range(ants_int)]) # each ant is given a random starting direction
-    
-    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs
 
-def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, directions):
+    alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
+    
+    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha
+
+def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, directions):
     fig, ax = plt.subplots()
     ax.set_xlim(0, grid_size[1]) # matplotlib swaps x and y axes
     ax.set_ylim(0, grid_size[0])
@@ -32,7 +34,6 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, direct
     fig.suptitle('Ant Simulation', fontweight ="bold")
 
     marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=ants_int//2) # spaces with many markers will be darkest green
-    alpha = 0.2 # persistence parameter (i.e. probability that the ant will change direction)
     def update(frame): # moves ants by a biased random walk
         for ant in range(ants_int): # moves ants 1 step in a random direction but keeps it on the grid
             if random.random() < alpha:
@@ -56,8 +57,8 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, direct
 
 def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
-    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs = initialise(directions)
+    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha = initialise(directions)
 
-    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, directions)
+    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, directions)
 
 main()
