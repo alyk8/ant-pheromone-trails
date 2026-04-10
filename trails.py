@@ -37,8 +37,8 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
     fig.suptitle('Ant Simulation – Basic Active Walkers', fontweight ="bold")
     fig.legend(loc='upper left')
 
-    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=1) # strongest markers will be darkest green
-    cbar = fig.colorbar(marks_plot, ax=ax)#, fraction=0.046, pad=0.04) # adds colour scale for markers
+    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=1) # markers with strength > 1 will be darkest green
+    cbar = fig.colorbar(marks_plot, ax=ax) # adds colour scale for markers
     cbar.set_label('Marker Strength')
     def update(frame): # moves ants by a biased random walk
         grid_marks[:] = grid_marks * decay_rate # applies decay rate to all markers
@@ -55,7 +55,7 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
             ants_locs[ant, 0] = max(0, min(new_x, grid_size[0] - 1)) # keeps ant within grid boundaries
             ants_locs[ant, 1] = max(0, min(new_y, grid_size[1] - 1))
 
-            grid_marks[ants_locs[ant, 0], ants_locs[ant, 1]] += 1 # adds marker
+            grid_marks[ants_locs[ant, 0], ants_locs[ant, 1]] += 1 # adds marker (may increase strength above 1, but this is capped in the plot)
 
         marks_plot.set_data(np.ma.masked_where(grid_marks.T < 0.1, grid_marks.T)) # hides markers with strength less than 0.1
         frame_text.set_text(f'Step {frame+1}')
