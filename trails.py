@@ -4,37 +4,25 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from configparser import ConfigParser
 
-def initialise():
+def initialise(directions):
     config = ConfigParser()
     config.read('config.ini') # reads in values from config file
 
     grid_size = np.array([int(config.get('trails', 'grid_size_x')), int(config.get('trails', 'grid_size_y'))], dtype=np.uint32)
+    grid_marks = np.zeros(shape=grid_size, dtype=np.uint8) # stores locs + levels of markers
     nest_loc = np.array([(grid_size[0]*int(config.get('trails', 'nest_loc_x')))//100,
                         (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint32)
+
     ants_int = int(config.get('trails', 'ants_int')) # initial no. of ants
-
-    grid_marks = np.zeros(shape=grid_size, dtype=np.uint8) # stores locs + levels of markers
     ants_locs = np.full(shape=(ants_int, 2), fill_value=nest_loc, dtype=np.uint32) # start all ants at the nest
-
-    """grid_food = np.zeros(shape=grid_size, dtype=np.uint8) # 1 = food, 0 = no food
-    food_int = int(config.get('trails', 'food_int')) # initial number of food locations
-    food_count = 0
-    while food_count < food_int: # adds food to random locations
-        x = random.randint(0, grid_size[0]-1)
-        y = random.randint(0, grid_size[1]-1)
-        if grid_food[x, y] == 0 and (x != nest_loc[0] or y != nest_loc[1]): # ensures location has no food and is not the nest
-            grid_food[x, y] = 1
-            food_count += 1"""
+    ants_dirs = np.array([random.choice(directions) for _ in range(ants_int)]) # each ant is given a random starting direction
     
-    return grid_size, nest_loc, ants_int, grid_marks, ants_locs
+    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs
 
-def grid(grid_size, nest_loc, ants_int, grid_marks, ants_locs):
+def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, directions):
     fig, ax = plt.subplots()
     ax.set_xlim(0, grid_size[1]) # matplotlib swaps x and y axes
     ax.set_ylim(0, grid_size[0])
-
-    #food_rows, food_cols = np.where(grid_food == 1) # finds all the food 
-    #ax.scatter(food_cols, food_rows, color='red', marker='x', s=50, label='Food') # plots food locations
     ax.scatter(nest_loc[1], nest_loc[0], color='b', marker='x', s=100, linewidth=2) # plots the nest location
 
     def format_coord(x, y): # changes the coordinate readout to integers (shows when hovering over the grid)
@@ -44,10 +32,19 @@ def grid(grid_size, nest_loc, ants_int, grid_marks, ants_locs):
     fig.suptitle('Ant Simulation', fontweight ="bold")
 
     marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=ants_int//2) # spaces with many markers will be darkest green
-    def update(frame): # moves ants by a simple random walk
+    alpha = 0.2 # persistence parameter (i.e. probability that the ant will change direction)
+    def update(frame): # moves ants by a biased random walk
         for ant in range(ants_int): # moves ants 1 step in a random direction but keeps it on the grid
-            ants_locs[ant, 0] = min(max(0, ants_locs[ant, 0] + random.randint(-1, 1)), grid_size[0]-1)
-            ants_locs[ant, 1] = min(max(0, ants_locs[ant, 1] + random.randint(-1, 1)), grid_size[1]-1)
+            if random.random() < alpha:
+                temp = ants_dirs[ant].copy()
+                while (ants_dirs[ant] == temp).all(): # ensures the direction actually changes
+                    ants_dirs[ant] = random.choice(directions) # chooses a random direction
+            
+            new_x = ants_locs[ant, 0] + ants_dirs[ant, 0] # calculates new ant position
+            new_y = ants_locs[ant, 1] + ants_dirs[ant, 1]
+
+            ants_locs[ant, 0] = max(0, min(new_x, grid_size[0] - 1)) # keeps ant within grid boundaries
+            ants_locs[ant, 1] = max(0, min(new_y, grid_size[1] - 1))
 
             grid_marks[ants_locs[ant, 0], ants_locs[ant, 1]] += 1 # adds marker
 
@@ -58,8 +55,9 @@ def grid(grid_size, nest_loc, ants_int, grid_marks, ants_locs):
     plt.show()
 
 def main():
-    grid_size, nest_loc, ants_int, grid_marks, ants_locs = initialise()
+    directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
+    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs = initialise(directions)
 
-    grid(grid_size, nest_loc, ants_int, grid_marks, ants_locs)
+    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, directions)
 
 main()
