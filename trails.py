@@ -19,14 +19,16 @@ def initialise(directions):
 
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
     decay_rate = float(config.get('trails', 'decay_rate')) # environmental decay applied to all markers
+    steps = int(config.get('trails', 'steps')) # no. of steps to simulate
     
-    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate
+    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps
 
-def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, directions):
+def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, directions):
     fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
     ax.set_xlim(0, grid_size[1]) # matplotlib swaps x and y axes
     ax.set_ylim(0, grid_size[0])
     ax.scatter(nest_loc[1], nest_loc[0], color='b', marker='x', s=100, linewidth=2, label='Nest') # plots the nest location
+    frame_text = ax.text(0.02, 0.95, 'Step 0', transform=ax.transAxes, fontsize=12, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
 
     def format_coord(x, y): # changes the coordinate readout to integers (shows when hovering over the grid)
         return 'x =% 2.0f, y =% 2.0f' % (x, y)
@@ -56,15 +58,16 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
             grid_marks[ants_locs[ant, 0], ants_locs[ant, 1]] += 1 # adds marker
 
         marks_plot.set_data(np.ma.masked_where(grid_marks.T < 0.1, grid_marks.T)) # hides markers with strength less than 0.1
-        return [marks_plot]
+        frame_text.set_text(f'Step {frame+1}')
+        return marks_plot, frame_text
 
-    ani = animation.FuncAnimation(fig, update, frames=200, interval=50, blit=False) # 50ms between frames
+    ani = animation.FuncAnimation(fig, update, frames=steps, interval=50, blit=False, repeat=False) # 50ms between frames
     plt.show()
 
 def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
-    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate = initialise(directions)
+    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps = initialise(directions)
 
-    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, directions)
+    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, directions)
 
 main()
