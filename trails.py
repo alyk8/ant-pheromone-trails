@@ -9,7 +9,7 @@ def initialise(directions):
     config.read('config.ini') # reads in values from config file
 
     grid_size = np.array([int(config.get('trails', 'grid_size_x')), int(config.get('trails', 'grid_size_y'))], dtype=np.uint32)
-    grid_marks = np.zeros(shape=grid_size, dtype=np.uint8) # stores locs + levels of markers
+    grid_marks = np.zeros(shape=grid_size, dtype=np.float32) # stores locs + levels of markers
     nest_loc = np.array([(grid_size[0]*int(config.get('trails', 'nest_loc_x')))//100,
                         (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint32)
 
@@ -18,24 +18,30 @@ def initialise(directions):
     ants_dirs = np.array([random.choice(directions) for _ in range(ants_int)]) # each ant is given a random starting direction
 
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
+    decay_rate = float(config.get('trails', 'decay_rate')) # environmental decay applied to all markers
     
-    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha
+    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate
 
-def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, directions):
-    fig, ax = plt.subplots()
+def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, directions):
+    fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
     ax.set_xlim(0, grid_size[1]) # matplotlib swaps x and y axes
     ax.set_ylim(0, grid_size[0])
-    ax.scatter(nest_loc[1], nest_loc[0], color='b', marker='x', s=100, linewidth=2) # plots the nest location
+    ax.scatter(nest_loc[1], nest_loc[0], color='b', marker='x', s=100, linewidth=2, label='Nest') # plots the nest location
 
     def format_coord(x, y): # changes the coordinate readout to integers (shows when hovering over the grid)
         return 'x =% 2.0f, y =% 2.0f' % (x, y)
     ax.format_coord = format_coord
 
-    fig.suptitle('Ant Simulation', fontweight ="bold")
+    fig.suptitle('Ant Simulation – Basic Active Walkers', fontweight ="bold")
+    fig.legend(loc='upper left')
 
-    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=ants_int//2) # spaces with many markers will be darkest green
+    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=1) # strongest markers will be darkest green
+    cbar = fig.colorbar(marks_plot, ax=ax)#, fraction=0.046, pad=0.04) # adds colour scale for markers
+    cbar.set_label('Marker Strength')
     def update(frame): # moves ants by a biased random walk
-        for ant in range(ants_int): # moves ants 1 step in a random direction but keeps it on the grid
+        grid_marks[:] = grid_marks * decay_rate # applies decay rate to all markers
+        
+        for ant in range(ants_int): # moves all ants one step in a random direction
             if random.random() < alpha:
                 temp = ants_dirs[ant].copy()
                 while (ants_dirs[ant] == temp).all(): # ensures the direction actually changes
@@ -49,16 +55,16 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
 
             grid_marks[ants_locs[ant, 0], ants_locs[ant, 1]] += 1 # adds marker
 
-        marks_plot.set_data(np.ma.masked_where(grid_marks.T == 0, grid_marks.T)) # only updates changes to grid_markers
+        marks_plot.set_data(np.ma.masked_where(grid_marks.T < 0.1, grid_marks.T)) # hides markers with strength less than 0.1
         return [marks_plot]
 
-    ani = animation.FuncAnimation(fig, update, frames=200, interval=50, blit=True) # 50ms between frames
+    ani = animation.FuncAnimation(fig, update, frames=200, interval=50, blit=False) # 50ms between frames
     plt.show()
 
 def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
-    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha = initialise(directions)
+    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate = initialise(directions)
 
-    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, directions)
+    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, directions)
 
 main()
