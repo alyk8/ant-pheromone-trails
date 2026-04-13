@@ -12,7 +12,14 @@ def initialise(directions):
     grid_marks = np.zeros(shape=grid_size, dtype=np.float32) # stores locs + levels of markers
     nest_loc = np.array([(grid_size[0]*int(config.get('trails', 'nest_loc_x')))//100,
                         (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint32)
-
+    food_num = int(config.get('trails', 'food_num')) # no. of food sources
+    food_locs = np.zeros(shape = [food_num, 3], dtype = np.uint32)
+    for f in range(food_num):
+        x = random.choice([random.randint(0, int(nest_loc[0]*0.95)), random.randint(int(nest_loc[0]*1.05), grid_size[0])])
+        y = random.choice([random.randint(0, int(nest_loc[1]*0.95)), random.randint(int(nest_loc[1]*1.05), grid_size[1])])
+        food_locs[f,0] = x
+        food_locs[f,1] = y
+        food_locs[f,2] = 1
     ants_int = int(config.get('trails', 'ants_int')) # initial no. of ants
     ants_locs = np.full(shape=(ants_int, 2), fill_value=nest_loc, dtype=np.uint32) # start all ants at the nest
     ants_dirs = np.array([random.choice(directions) for _ in range(ants_int)]) # each ant is given a random starting direction
@@ -21,15 +28,19 @@ def initialise(directions):
     decay_rate = float(config.get('trails', 'decay_rate')) # environmental decay applied to all markers
     steps = int(config.get('trails', 'steps')) # no. of steps to simulate
     
-    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps
+    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs
 
-def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, directions):
+def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs, directions):
     fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
     ax.set_xlim(0, grid_size[1]) # matplotlib swaps x and y axes
     ax.set_ylim(0, grid_size[0])
     ax.scatter(nest_loc[1], nest_loc[0], color='b', marker='x', s=100, linewidth=2, label='Nest') # plots the nest location
     frame_text = ax.text(0.02, 0.95, 'Step 0', transform=ax.transAxes, fontsize=12, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-
+    for f in range(food_num):
+        if f == 0:
+            ax.scatter(food_locs[f,1], food_locs[f,0], color='r', marker='o', s=100, linewidth=1, label='Food')
+        else:
+            ax.scatter(food_locs[f,1], food_locs[f,0], color='r', marker='o', s=100, linewidth=1)
     def format_coord(x, y): # changes the coordinate readout to integers (shows when hovering over the grid)
         return 'x =% 2.0f, y =% 2.0f' % (x, y)
     ax.format_coord = format_coord
@@ -37,7 +48,7 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
     fig.suptitle('Ant Simulation – Basic Active Walkers', fontweight ="bold")
     fig.legend(loc='upper left')
 
-    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=1) # markers with strength > 1 will be darkest green
+    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Blues', alpha=0.7, vmin=0, vmax=1) # markers with strength > 1 will be darkest green
     cbar = fig.colorbar(marks_plot, ax=ax) # adds colour scale for markers
     cbar.set_label('Marker Strength')
     def update(frame): # moves ants by a biased random walk
@@ -66,8 +77,8 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
 
 def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
-    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps = initialise(directions)
+    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs = initialise(directions)
 
-    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, directions)
+    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs, directions)
 
 main()
