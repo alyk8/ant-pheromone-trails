@@ -25,15 +25,15 @@ def initialise(directions):
     ants_locs = np.full(shape=(ants_int, 2), fill_value=nest_loc, dtype=np.uint32) # start all ants at the nest
     ants_dirs = np.array([random.choice(directions) for _ in range(ants_int)]) # each ant is given a random starting direction
     ants_sens = np.ones(ants_int, dtype=np.float32) # ant sensitivity to markers (initially set to 1 for all ants)
-    ants = np.column_stack((ants_locs, ants_dirs, ants_sens))
-    print(ants)
+    ants = np.column_stack((ants_locs, ants_dirs, ants_sens)) # combines ants info into a single array: [x, y, dx, dy, sensitivity]
+
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
     decay_rate = float(config.get('trails', 'decay_rate')) # environmental decay applied to all markers
     steps = int(config.get('trails', 'steps')) # no. of steps to simulate
     
-    return grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs
+    return grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rate, steps, food_num, food_locs
 
-def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs, directions):
+def grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rate, steps, food_num, food_locs, directions):
     fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
     ax.set_xlim(0, grid_size[1]) # matplotlib swaps x and y axes
     ax.set_ylim(0, grid_size[0])
@@ -60,18 +60,18 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
         grid_marks[:] = grid_marks * decay_rate # applies decay rate to all markers
         
         for ant in range(ants_int): # moves all ants one step in a random direction
-            if random.random() < alpha:
-                temp = ants_dirs[ant].copy()
-                while (ants_dirs[ant] == temp).all(): # ensures the direction actually changes
-                    ants_dirs[ant] = random.choice(directions) # chooses a random direction
+            if random.random() < alpha: # ant changes direction with probability alpha (persistence parameter)
+                temp = ants[ant, 2:3].copy() # [x, y, dx, dy, sensitivity]
+                while (ants[ant, 2:3] == temp).all(): # ensures the direction actually changes
+                    ants[ant, 2:3] = random.choice(directions) # chooses a random direction
             
-            new_x = ants_locs[ant, 0] + ants_dirs[ant, 0] # calculates new ant position
-            new_y = ants_locs[ant, 1] + ants_dirs[ant, 1]
+            new_x = ants[ant, 0] + ants[ant, 2] # calculates new ant position
+            new_y = ants[ant, 1] + ants[ant, 3]
 
-            ants_locs[ant, 0] = max(0, min(new_x, grid_size[0] - 1)) # keeps ant within grid boundaries
-            ants_locs[ant, 1] = max(0, min(new_y, grid_size[1] - 1))
+            ants[ant, 0] = max(0, min(new_x, grid_size[0] - 1)) # keeps ant within grid boundaries
+            ants[ant, 1] = max(0, min(new_y, grid_size[1] - 1))
 
-            grid_marks[ants_locs[ant, 0], ants_locs[ant, 1]] += 1 # adds marker (may increase strength above 1, but this is capped in the plot)
+            grid_marks[ants[ant, 0], ants[ant, 1]] += 1 # adds marker (may increase strength above 1, but this is capped in the plot)
 
         marks_plot.set_data(np.ma.masked_where(grid_marks.T < 0.1, grid_marks.T)) # hides markers with strength less than 0.1
         frame_text.set_text(f'Step {frame+1}')
@@ -82,8 +82,8 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
 
 def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
-    grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs = initialise(directions)
+    grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rate, steps, food_num, food_locs = initialise(directions)
 
-    #grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs, directions)
+    grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rate, steps, food_num, food_locs, directions)
 
 main()
