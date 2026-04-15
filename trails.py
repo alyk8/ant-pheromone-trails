@@ -12,18 +12,21 @@ def initialise(directions):
     grid_marks = np.zeros(shape=grid_size, dtype=np.float32) # stores locs + levels of markers
     nest_loc = np.array([(grid_size[0]*int(config.get('trails', 'nest_loc_x')))//100,
                         (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint32)
+    
     food_num = int(config.get('trails', 'food_num')) # no. of food sources
-    food_locs = np.zeros(shape = [food_num, 3], dtype = np.uint32)
+    food_locs = np.zeros(shape = [food_num, 3], dtype = np.uint32) # stores locs of food sources + their level
     for f in range(food_num):
-        x = random.choice([random.randint(0, int(nest_loc[0]*0.95)), random.randint(int(nest_loc[0]*1.05), grid_size[0])])
-        y = random.choice([random.randint(0, int(nest_loc[1]*0.95)), random.randint(int(nest_loc[1]*1.05), grid_size[1])])
-        food_locs[f,0] = x
-        food_locs[f,1] = y
-        food_locs[f,2] = 1
+        # ensures the food is not placed too close to the nest (i.e. within 5% of the grid size)
+        food_locs[f, 0] = random.choice([random.randint(0, int(nest_loc[0]*0.95)), random.randint(int(nest_loc[0]*1.05), grid_size[0])])
+        food_locs[f, 1] = random.choice([random.randint(0, int(nest_loc[1]*0.95)), random.randint(int(nest_loc[1]*1.05), grid_size[1])])
+        food_locs[f, 2] = 1 # diminishing supply (scale from 0-1)
+    
     ants_int = int(config.get('trails', 'ants_int')) # initial no. of ants
     ants_locs = np.full(shape=(ants_int, 2), fill_value=nest_loc, dtype=np.uint32) # start all ants at the nest
     ants_dirs = np.array([random.choice(directions) for _ in range(ants_int)]) # each ant is given a random starting direction
-
+    ants_sens = np.ones(ants_int, dtype=np.float32) # ant sensitivity to markers (initially set to 1 for all ants)
+    ants = np.column_stack((ants_locs, ants_dirs, ants_sens))
+    print(ants)
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
     decay_rate = float(config.get('trails', 'decay_rate')) # environmental decay applied to all markers
     steps = int(config.get('trails', 'steps')) # no. of steps to simulate
@@ -36,11 +39,13 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha,
     ax.set_ylim(0, grid_size[0])
     ax.scatter(nest_loc[1], nest_loc[0], color='b', marker='x', s=100, linewidth=2, label='Nest') # plots the nest location
     frame_text = ax.text(0.02, 0.95, 'Step 0', transform=ax.transAxes, fontsize=12, bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-    for f in range(food_num):
-        if f == 0:
-            ax.scatter(food_locs[f,1], food_locs[f,0], color='r', marker='o', s=100, linewidth=1, label='Food')
+    
+    for f in range(food_num): # adds food locations to the plot
+        if f == 0: # only adds label for the first food source to avoid duplicates in the legend
+            ax.scatter(food_locs[f, 1], food_locs[f,0], color='r', marker='o', s=100, linewidth=1, label='Food')
         else:
-            ax.scatter(food_locs[f,1], food_locs[f,0], color='r', marker='o', s=100, linewidth=1)
+            ax.scatter(food_locs[f, 1], food_locs[f, 0], color='r', marker='o', s=100, linewidth=1)
+    
     def format_coord(x, y): # changes the coordinate readout to integers (shows when hovering over the grid)
         return 'x =% 2.0f, y =% 2.0f' % (x, y)
     ax.format_coord = format_coord
@@ -79,6 +84,6 @@ def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
     grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs = initialise(directions)
 
-    grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs, directions)
+    #grid(grid_size, grid_marks, nest_loc, ants_int, ants_locs, ants_dirs, alpha, decay_rate, steps, food_num, food_locs, directions)
 
 main()
