@@ -53,7 +53,7 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, st
     fig.suptitle('Ant Simulation – Basic Active Walkers', fontweight ="bold")
     fig.legend(loc='upper left')
 
-    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Blues', alpha=0.7, vmin=0, vmax=1) # markers with strength > 1 will be darkest green
+    marks_plot = ax.imshow(np.zeros(grid_size), cmap='Greens', alpha=0.7, vmin=0, vmax=1) # markers with strength > 1 will be darkest green
     cbar = fig.colorbar(marks_plot, ax=ax) # adds colour scale for markers
     cbar.set_label('Marker Strength')
     def update(frame): # moves ants by a biased random walk
