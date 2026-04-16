@@ -24,7 +24,7 @@ This reproduces the spontaneous, undirected trail structures shown in Figure 2 o
 
 ```
 .
-├── main.py         # Main simulation script
+├── trails.py       # Main simulation script
 ├── config.ini      # All model parameters (edit this to change behaviour)
 └── README.md
 ```
@@ -59,7 +59,7 @@ cd <repo-folder>
 3. Run the simulation:
 
 ```bash
-python main.py
+python trails.py
 ```
 
 An animated plot will appear showing the pheromone marker field evolving over 1000 steps. The nest is marked with a blue cross. Marker strength is shown on a green colour scale — darker green indicates cells that have been visited more frequently.
@@ -78,8 +78,10 @@ All parameters are set in `config.ini`. No code changes are needed to adjust the
 | `nest_loc_y` | `50` | Nest y position as % of grid height |
 | `ants_int` | `10` | Number of ants |
 | `alpha` | `0.2` | Probability an ant changes direction each step [0-1] |
-| `decay_rate` | `0.97` | Multiplicative decay applied to all markers each frame [0-1] |
+| `decay_rate` | `0.98` | Multiplicative decay applied to all markers each frame [0-1] |
+| `sensitivity_decay_rate` | `0.99` | Per-step decay of each ant's pheromone sensitivity [0-1] |
 | `steps` | `1000` | Number of steps to simulate |
+| `food_num` | `5` | Number of food sources |
 
 **Notes on parameters:**
 
