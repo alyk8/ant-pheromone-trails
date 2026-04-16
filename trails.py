@@ -61,9 +61,9 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, st
         
         for ant in range(ants_int): # moves all ants one step in a random direction
             if random.random() < alpha: # ant changes direction with probability alpha (persistence parameter)
-                temp = ants[ant, 2:3].copy() # ants = [x, y, dx, dy, sensitivity]
-                while (ants[ant, 2:3] == temp).all(): # ensures the direction actually changes
-                    ants[ant, 2:3] = random.choice(directions) # chooses a random direction
+                temp = ants[ant, 2:4].copy() # ants = [x, y, dx, dy, sensitivity]
+                while (ants[ant, 2:4] == temp).all(): # ensures the direction actually changes
+                    ants[ant, 2:4] = random.choice(directions) # chooses a random direction
             
             new_x = ants[ant, 0] + ants[ant, 2] # calculates new ant position
             new_y = ants[ant, 1] + ants[ant, 3]
@@ -71,7 +71,7 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, st
             ants[ant, 0] = max(0, min(new_x, grid_size[0] - 1)) # keeps ant within grid boundaries
             ants[ant, 1] = max(0, min(new_y, grid_size[1] - 1))
 
-            grid_marks[ants[ant, 0], ants[ant, 1]] += 1 # adds marker (may increase strength above 1, but this is capped in the plot)
+            grid_marks[int(ants[ant, 0]), int(ants[ant, 1])] += 1 # adds marker (may increase strength above 1, but this is capped in the plot)
             ants[ant, 4] *= decay_rates[1] # applies sensitivity decay rate
 
         marks_plot.set_data(np.ma.masked_where(grid_marks.T < 0.1, grid_marks.T)) # hides markers with strength less than 0.1
