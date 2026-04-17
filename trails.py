@@ -31,10 +31,11 @@ def initialise(directions):
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
     decay_rates = np.array([float(config.get('trails', 'decay_rate')), float(config.get('trails', 'sensitivity_decay_rate'))]) # environmental decay applied to all markers
     steps = int(config.get('trails', 'steps')) # no. of steps to simulate
+    detection_range = int(config.get('trails', 'detection_range')) # how many directions the ant can detect
     
-    return grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, steps, food_num, food_locs
+    return grid_size, grid_marks, nest_loc, food_num, food_locs, ants_int, ants, alpha, decay_rates, steps, detection_range
 
-def grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, steps, food_num, food_locs, directions):
+def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, ants_int, ants, alpha, decay_rates, steps, detection_range, directions):
     fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
     ax.set_xlim(0, grid_size[1]) # matplotlib swaps x and y axes
     ax.set_ylim(0, grid_size[0])
@@ -79,7 +80,7 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, st
                 dirs = [] # stores all possible new directions (i.e. those that are within the grid boundaries and not blocked by food or the nest)
                 markers = [] # stores the directions and strengths of detected markers in the ant's direction of movement
                 current_dir = ants[ant, 2:4].copy() # current direction for ant
-                detects = getDirections(current_dir, directions) # gets the 3 directions the ant can detect based on its current direction of movement
+                detects = getDetectionDirections(current_dir, directions, detection_range) # gets the directions the ant can detect markers based on its current direction of movement
                 for dir in directions:
                     check_x = int(ants[ant, 0] + dir[0])
                     check_y = int(ants[ant, 1] + dir[1])
@@ -132,29 +133,17 @@ def grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, st
     ani = animation.FuncAnimation(fig, update, frames=steps, interval=50, blit=False, repeat=False) # 50ms between frames
     plt.show()
 
-def getDirections(current_dir, directions):
-    idx = directions.index(tuple(current_dir))
-    if idx == 0:
-        return [directions[7], directions[0], directions[1]]
-    elif idx == 1:
-        return [directions[0], directions[1], directions[2]]
-    elif idx == 2:
-        return [directions[1], directions[2], directions[3]]
-    elif idx == 3:
-        return [directions[2], directions[3], directions[4]]
-    elif idx == 4:
-        return [directions[3], directions[4], directions[5]]
-    elif idx == 5:
-        return [directions[4], directions[5], directions[6]]
-    elif idx == 6:
-        return [directions[5], directions[6], directions[7]]
-    else: # idx == 7
-        return [directions[6], directions[7], directions[0]]
+def getDetectionDirections(current_dir, directions, range=3):
+    idx = directions.index(tuple(current_dir)) # gets index of current direction
+    low = (idx - (range-1)//2) % len(directions) # index of the direction to the left of the current direction
+    high = (idx + (range-1)//2) % len(directions) # index of the direction to the right of the current direction
+
+    return [directions[low], directions[idx], directions[high]] # returns the 3 directions the ant can detect based on its current direction of movement
 
 def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
-    grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, steps, food_num, food_locs = initialise(directions)
+    grid_size, grid_marks, nest_loc, food_num, food_locs, ants_int, ants, alpha, decay_rates, steps, detection_range = initialise(directions)
 
-    grid(grid_size, grid_marks, nest_loc, ants_int, ants, alpha, decay_rates, steps, food_num, food_locs, directions)
+    grid(grid_size, grid_marks, nest_loc, food_num, food_locs, ants_int, ants, alpha, decay_rates, steps, detection_range, directions)
 
 main()
