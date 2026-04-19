@@ -23,24 +23,25 @@ def initialise(directions):
     food_step = float(config.get('trails', 'food_step')) # how much food can an ant eat at once
     
     ants_pop = np.array([int(config.get('trails', 'ants_num')), int(config.get('trails', 'scout_ants')), int(config.get('trails', 'recruitment_rate'))]) # ant population size, initial number of scout ants, recruitment rate
-    ants_locs = np.full(shape=(ants_pop[0], 2), fill_value=nest_loc, dtype=np.uint32) # start all ants at the nest
+    ants_locs = np.full(shape=(ants_pop[0], 2), fill_value=nest_loc, dtype=np.float32) # start all ants at the nest
     ants_dirs = np.array([random.choice(directions) for _ in range(ants_pop[0])]) # each ant is given a random starting direction
     ants_mark = np.zeros(ants_pop[0], dtype=np.int8) # which marker the ant is currently following (0 if not following any marker)
-    ants = np.column_stack((ants_locs, ants_dirs, ants_mark)) # combines ants info into a single array: [x, y, dx, dy, marker]
+    ants_drop = np.ones(ants_pop[0], dtype=np.int8) # how much marker the ant will drop at each step
+    ants = np.column_stack((ants_locs, ants_dirs, ants_mark, ants_drop)) # combines ants info into a single array: [x, y, dx, dy, marker, drop_rate]
 
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
-    decay_rate = float(config.get('trails', 'decay_rate')) # environmental decay applied to all markers
+    decay_rates = np.array([1 - float(config.get('trails', 'marker_decay_rate')), float(config.get('trails', 'drop_rate_decay'))], dtype=np.float32)
     steps = int(config.get('trails', 'steps')) # no. of steps to simulate
     detection_range = int(config.get('trails', 'detection_range')) # how many directions the ant can detect
     
-    return grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rate, steps, detection_range
+    return grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, detection_range
 
 def getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, detection_range):
     dirs = [] # stores all possible new directions (i.e. those that are within the grid boundaries and not blocked by food or the nest)
     current_dir = ants[ant, 2:4].copy() # current direction for ant
     markers = [] # stores the directions and strengths of detected markers in the ant's direction of movement
     detects = [] # directions the ant can detect based on its current direction of movement
-    if (ants[ant, 4] == 1) or (ants[ant, 4] == 2): # if the ant is currently following marker A or B
+    if (int(ants[ant, 4]) == 1) or (int(ants[ant, 4]) == 2): # if the ant is currently following marker A or B
         detects = getDetectionDirections(current_dir, directions, detection_range)
 
     for dir in directions:
@@ -48,8 +49,8 @@ def getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, de
         y = int(ants[ant, 1] + dir[1])
         if (x >= 0) and (x < grid_size[0]) and (y >= 0) and (y < grid_size[1]):
             if dir in detects: # if it's in the ant's field of detection
-                if temp_grid_marks[x, y, ants[ant, 4] - 1] > 0: # checks for marker in that direction (ants[ant, 4] - 1 gives the marker)
-                    markers.append([dir, temp_grid_marks[x, y, ants[ant, 4] - 1]]) # adds location and strength of marker
+                if temp_grid_marks[x, y, int(ants[ant, 4]) - 1] > 0: # checks for marker in that direction (ants[ant, 4] - 1 gives the marker)
+                    markers.append([dir, temp_grid_marks[x, y, int(ants[ant, 4]) - 1]]) # adds location and strength of marker
                 else: # if no marker
                     dirs.append(dir)
             else: # if it's not in the ant's field of detection
@@ -69,7 +70,7 @@ def getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, de
         probs = [marker[1]/total for marker in markers] # probability of choosing each direction is proportional to the marker strength in that direction
         ants[ant, 2:4] = random.choices([marker[0] for marker in markers], weights=probs, k=1)[0] # chooses a direction based on the probabilities
 
-def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rate, steps, detection_range, directions):
+def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, detection_range, directions):
     fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
     ax.set_xlim(0, grid_size[0])
     ax.set_ylim(0, grid_size[1])
@@ -107,26 +108,29 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         
         for ant in range(ants_int): # moves all ants one step
             found = False # if the ant has found food or returned to nest
-            for f in range(food_num): # checks if the ant has found food
-                if (ants[ant, 4] != 1) and (ants[ant, 0] >= food_locs[f, 0]*0.99) and (ants[ant, 0] <= food_locs[f, 0]*1.01) and (ants[ant, 1] >= food_locs[f, 1]*0.99) and (ants[ant, 1] <= food_locs[f, 1]*1.01) and food_locs[f, 2] > 0: # if the ant is within 1% of food source and not already returning
-                    print('Ant', ant, 'found food at', food_locs[f, 0:2], 'with level', str(food_locs[f, 2]), 'at step', frame)
-                    food_locs[f, 2] = max(0, food_locs[f, 2] - food_step) # reduces the food level by a fixed amount (can be adjusted)
-                    food_plots[f].set_facecolor('orange') # mark food as found
-                    ants[ant, 4] = 1 # ant starts following marker A
-                    ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the nest
-                    found = True
-                    break
-
-            if (ants[ant, 0] >= nest_loc[0]*0.99) and (ants[ant, 0] <= nest_loc[0]*1.01) and (ants[ant, 1] >= nest_loc[1]*0.99) and (ants[ant, 1] <= nest_loc[1]*1.01) and ants[ant, 4] == 1: # if the ant is within 1% of the nest and is following marker A (i.e. it has found food)
+            if (int(ants[ant, 4]) == 1) and (ants[ant, 0] >= nest_loc[0]*0.99) and (ants[ant, 0] <= nest_loc[0]*1.01) and (ants[ant, 1] >= nest_loc[1]*0.99) and (ants[ant, 1] <= nest_loc[1]*1.01): # if the ant is within 1% of the nest with food
                 print('Ant', ant, 'returned to nest with food at step', frame)
                 ants[ant, 4] = 2 # ant starts following marker B
-                ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the food
+                ants[ant, 2:4] = -ants[ant, 2:4]
+                ants[ant, 5] = 1
                 for _ in range(ants_pop[2]): # recruits more ants when an ant successfully returns to the nest with food
                     if ants_int < ants_pop[0]: # checks if the total number of ants has not been exceeded
                         ants[ants_int, 2:4] = ants[ant, 2:4] # same direction as food
                         ants[ants_int, 4] = 2 # follows marker B
                         ants_int += 1
                 found = True
+            
+            if (int(ants[ant, 4]) != 1) and not found: # if the ant is searching for food (i.e. not currently following marker A)
+                for f in range(food_num): # checks if the ant has found food
+                    if (ants[ant, 0] >= food_locs[f, 0]*0.99) and (ants[ant, 0] <= food_locs[f, 0]*1.01) and (ants[ant, 1] >= food_locs[f, 1]*0.99) and (ants[ant, 1] <= food_locs[f, 1]*1.01) and food_locs[f, 2] > 0: # if the ant is within 1% of food source
+                        print('Ant', ant, 'found food at', food_locs[f, 0:2], 'with level', str(food_locs[f, 2]), 'at step', frame)
+                        food_locs[f, 2] = max(0, food_locs[f, 2] - food_step) # reduces the food level by a fixed amount (can be adjusted)
+                        food_plots[f].set_facecolor('orange') # mark food as found
+                        ants[ant, 4] = 1 # ant starts following marker A
+                        ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the nest
+                        ants[ant, 5] = 1 # resets the ant's drop rate
+                        found = True
+                        break
 
             if not found: # updates the ant's direction based on the current grid markers
                 getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, detection_range)
@@ -137,10 +141,12 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
             ants[ant, 0] = max(0, min(new_x, grid_size[0] - 1)) # keeps ant within grid boundaries
             ants[ant, 1] = max(0, min(new_y, grid_size[1] - 1))
 
-            if ants[ant, 4] == 1: # if the ant is following marker A (i.e. it has found food and is heading back to the nest)
-                grid_marks[int(ants[ant, 0]), int(ants[ant, 1]), 1] += 1 # drops marker B (may increase strength above 1, but this is capped in the plot)
+            # drops markers, may increase above 1 but this is capped in the plot
+            if int(ants[ant, 4]) == 1: # if the ant is following marker A (i.e. it has found food and is heading back to the nest)
+                grid_marks[int(ants[ant, 0]), int(ants[ant, 1]), 1] += ants[ant, 5] # marker B
             else: # if the ant is moving randomly or following marker B (i.e. searching for food)
-                grid_marks[int(ants[ant, 0]), int(ants[ant, 1]), 0] += 1 # drops marker A
+                grid_marks[int(ants[ant, 0]), int(ants[ant, 1]), 0] += ants[ant, 5] # marker A
+            ants[ant, 5] = max(decay_rates[1], ants[ant, 5] - decay_rates[1]) # applies drop rate decay
 
         # updates the marker plots and removes markers with strength < 0.1 to improve visibility (this threshold can be adjusted)
         marks_plot_A.set_data(np.ma.masked_where(temp_grid_marks[:, :, 0].T < 0.1, grid_marks[:, :, 0].T)) # marker A
@@ -148,10 +154,10 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         step_counter.set_text(f'Step {frame+1}')
         ant_counter.set_text(f'Ants: {ants_int}')
 
-        grid_marks[:] = grid_marks*decay_rate # applies decay rate to all markers
+        grid_marks[:] = grid_marks*decay_rates[0] # applies decay rate to all markers
         return marks_plot_A, marks_plot_B, step_counter, ant_counter
 
-    ani = animation.FuncAnimation(fig, update, frames=steps, interval=0, blit=False, repeat=False) # 50ms between frames
+    ani = animation.FuncAnimation(fig, update, frames=steps, interval=50, blit=False, repeat=False) # 50ms between frames
     plt.show()
 
 def getDetectionDirections(current_dir, directions, range=3):
@@ -163,8 +169,8 @@ def getDetectionDirections(current_dir, directions, range=3):
 
 def main():
     directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
-    grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rate, steps, detection_range = initialise(directions)
+    grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, detection_range = initialise(directions)
 
-    grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rate, steps, detection_range, directions)
+    grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, detection_range, directions)
 
 main()
