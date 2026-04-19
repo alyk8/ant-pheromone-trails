@@ -24,19 +24,22 @@ def initialise(directions):
     
     ants_pop = np.array([int(config.get('trails', 'ants_num')), int(config.get('trails', 'scout_ants')), int(config.get('trails', 'recruitment_rate'))]) # ant population size, initial number of scout ants, recruitment rate
     ants_locs = np.full(shape=(ants_pop[0], 2), fill_value=nest_loc, dtype=np.float32) # start all ants at the nest
-    ants_dirs = np.array([random.choice(directions) for _ in range(ants_pop[0])]) # each ant is given a random starting direction
-    ants_mark = np.zeros(ants_pop[0], dtype=np.int8) # which marker the ant is currently following (0 if not following any marker)
-    ants_drop = np.ones(ants_pop[0], dtype=np.int8) # how much marker the ant will drop at each step
-    ants = np.column_stack((ants_locs, ants_dirs, ants_mark, ants_drop)) # combines ants info into a single array: [x, y, dx, dy, marker, drop_rate]
+    ants_dirs = np.array([random.choice(directions) for _ in range(ants_pop[0])], dtype=np.float32) # each ant is given a random starting direction
+    ants_mark = np.zeros(ants_pop[0], dtype=np.float32) # which marker the ant is currently following (0 if not following any marker)
+    ants_drop = np.ones(ants_pop[0], dtype=np.float32) # how much marker the ant will drop at each step
+    ants_sens = np.ones(ants_pop[0], dtype=np.float32) # how sensitive the ant is to the markers
+    ants_act = np.zeros(ants_pop[0], dtype=np.float32) # whether the ant is active
+    ants_act[:ants_pop[1]] = 1 # initialise the first 'scout_ants' as active
+    ants = np.column_stack((ants_locs, ants_dirs, ants_mark, ants_drop, ants_sens, ants_act)) # [x, y, dx, dy, marker, drop_rate, sensitivity, active]
 
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
-    decay_rates = np.array([1 - float(config.get('trails', 'marker_decay_rate')), float(config.get('trails', 'drop_rate_decay'))], dtype=np.float32)
+    decay_rates = np.array([1 - float(config.get('trails', 'marker_decay_rate')), float(config.get('trails', 'drop_rate_decay')), float(config.get('trails', 'sensitivity_decay'))], dtype=np.float32) # marker, drop rate and sensitivity decay rates
     steps = int(config.get('trails', 'steps')) # no. of steps to simulate
     detection_range = int(config.get('trails', 'detection_range')) # how many directions the ant can detect
     
     return grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, detection_range
 
-def getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, detection_range):
+def getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, decay_rates, detection_range):
     dirs = [] # stores all possible new directions (i.e. those that are within the grid boundaries and not blocked by food or the nest)
     current_dir = ants[ant, 2:4].copy() # current direction for ant
     markers = [] # stores the directions and strengths of detected markers in the ant's direction of movement
@@ -49,26 +52,26 @@ def getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, de
         y = int(ants[ant, 1] + dir[1])
         if (x >= 0) and (x < grid_size[0]) and (y >= 0) and (y < grid_size[1]):
             if dir in detects: # if it's in the ant's field of detection
-                if temp_grid_marks[x, y, int(ants[ant, 4]) - 1] > 0: # checks for marker in that direction (ants[ant, 4] - 1 gives the marker)
+                if temp_grid_marks[x, y, int(ants[ant, 4]) - 1] > decay_rates[0]: # checks for marker A or B in that direction
                     markers.append([dir, temp_grid_marks[x, y, int(ants[ant, 4]) - 1]]) # adds location and strength of marker
                 else: # if no marker
                     dirs.append(dir)
             else: # if it's not in the ant's field of detection
                 dirs.append(dir)
-        
-    if len(markers) == 0: # if no markers are detected (or ant is moving randomly)
-        if random.random() < alpha: # ant changes direction with probability alpha (persistence parameter)
-            for i, d in enumerate(dirs):
-                if np.array_equal(d, current_dir):
-                    dirs.pop(i) # removes current direction from the list of possible new directions (if it exists)
-                    break
-            ants[ant, 2:4] = random.choice(dirs) # chooses a random direction from the remaining options
-    elif len(markers) == 1: # if one marker is detected
-        ants[ant, 2:4] = markers[0][0] # chooses the direction of the detected marker
-    else: # if more than one marker is detected
-        total = sum([marker[1] for marker in markers]) # total marker strength across all detected directions
-        probs = [marker[1]/total for marker in markers] # probability of choosing each direction is proportional to the marker strength in that direction
-        ants[ant, 2:4] = random.choices([marker[0] for marker in markers], weights=probs, k=1)[0] # chooses a direction based on the probabilities
+    
+    if (len(markers) > 0) and (random.random() < ants[ant, 6]): # if the ant detects markers and is sensitive enough to react to them
+        if len(markers) == 1: # if only one marker is detected, the ant will choose that direction
+            ants[ant, 2:4] = markers[0][0]
+        elif len(markers) == 2: # if two markers are detected, the ant will choose between them with a probability proportional to their strength
+            total = sum([marker[1] for marker in markers]) # total marker strength in all directions
+            probs = [marker[1]/total for marker in markers]
+            ants[ant, 2:4] = random.choices([marker[0] for marker in markers], weights=probs, k=1)[0]
+    elif random.random() < alpha: # with probability alpha, the ant changes direction randomly
+        for i, d in enumerate(dirs):
+            if np.array_equal(d, current_dir):
+                dirs.pop(i) # removes current direction from the list of possible new directions (if it exists)
+                break
+        ants[ant, 2:4] = random.choice(dirs) # chooses a random direction from the remaining options
 
 def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, detection_range, directions):
     fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
@@ -83,7 +86,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         label = ''
         if f == 0: # only adds label for the first food source to avoid duplicates in the legend
             label = 'Food'
-        food_plots[f] = ax.scatter(food_locs[f, 0], food_locs[f, 1], color='r', marker='o', s=100, linewidth=1, label=label)
+        food_plots[f] = ax.scatter(food_locs[f, 0], food_locs[f, 1], color='r', marker='o', s=50, linewidth=1, label=label)
     
     def format_coord(x, y): # changes the coordinate readout to integers (shows when hovering over the grid)
         return 'x =% 2.0f, y =% 2.0f' % (x, y)
@@ -100,40 +103,57 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     cbar_A = fig.colorbar(marks_plot_A, ax=ax) # adds colour scale for marker A
     cbar_A.set_label('Marker A')
 
-    ants_int = ants_pop[1] # number of active ants (scout + recruited ants)
+    ants_act = ants_pop[1].copy() # number of active ants
 
     def update(frame): # moves ants by a biased random walk
-        nonlocal ants_int # allows the function to modify ants_int variable defined in the outer scope
+        nonlocal ants_act # allows the function to modify these variables defined in the outer scope
+        if pause: return # pauses the animation when clicked
         temp_grid_marks = grid_marks.copy() # temp grid to ensure concurrent movement, i.e. ants don't react to markers dropped in the same step
         
-        for ant in range(ants_int): # moves all ants one step
+        for ant in range(ants_pop[0]): # moves all ants one step
+            if ants[ant, 7] == 0: # inactive ant
+                continue
+            elif ants[ant, 6] < 0.5: # removes ants with low sensitivity from the system
+                ants[ant, 0:2] = nest_loc # resets start loc to nest
+                ants[ant, 5] = 1 # resets drop rate
+                ants[ant, 6] = 1 # resets sensitivity
+                ants[ant, 7] = 0 # deactivates the ant
+                ants_act -= 1
+                print('Ant', ant, 'removed due to low sensitivity at step', frame)
+                continue
+
             found = False # if the ant has found food or returned to nest
             if (int(ants[ant, 4]) == 1) and (ants[ant, 0] >= nest_loc[0]*0.99) and (ants[ant, 0] <= nest_loc[0]*1.01) and (ants[ant, 1] >= nest_loc[1]*0.99) and (ants[ant, 1] <= nest_loc[1]*1.01): # if the ant is within 1% of the nest with food
                 print('Ant', ant, 'returned to nest with food at step', frame)
-                ants[ant, 4] = 2 # ant starts following marker B
-                ants[ant, 2:4] = -ants[ant, 2:4]
-                ants[ant, 5] = 1
-                for _ in range(ants_pop[2]): # recruits more ants when an ant successfully returns to the nest with food
-                    if ants_int < ants_pop[0]: # checks if the total number of ants has not been exceeded
-                        ants[ants_int, 2:4] = ants[ant, 2:4] # same direction as food
-                        ants[ants_int, 4] = 2 # follows marker B
-                        ants_int += 1
                 found = True
+                ants[ant, 4] = 2 # ant starts following marker B
+                ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the nest
+                ants[ant, 5] = 1 # resets the ant's drop rate
+                for _ in range(ants_pop[2]): # recruits more ants when an ant successfully returns to the nest with food
+                    if ants_act < ants_pop[0]: # checks if the total number of ants has not been exceeded
+                        for x in range(ants_pop[0]): # finds an inactive ant to recruit
+                            if ants[x, 7] == 0:
+                                ants[x, 2:4] = ants[ant, 2:4] # same direction as food
+                                ants[x, 4] = 2 # follows marker B
+                                ants[x, 7] = 1 # activates the ant
+                                ants_act += 1
+                                break
             
             if (int(ants[ant, 4]) != 1) and not found: # if the ant is searching for food (i.e. not currently following marker A)
                 for f in range(food_num): # checks if the ant has found food
                     if (ants[ant, 0] >= food_locs[f, 0]*0.99) and (ants[ant, 0] <= food_locs[f, 0]*1.01) and (ants[ant, 1] >= food_locs[f, 1]*0.99) and (ants[ant, 1] <= food_locs[f, 1]*1.01) and food_locs[f, 2] > 0: # if the ant is within 1% of food source
                         print('Ant', ant, 'found food at', food_locs[f, 0:2], 'with level', str(food_locs[f, 2]), 'at step', frame)
-                        food_locs[f, 2] = max(0, food_locs[f, 2] - food_step) # reduces the food level by a fixed amount (can be adjusted)
+                        found = True
+                        food_locs[f, 2] = max(0, food_locs[f, 2] - food_step) # reduces the food level by a fixed amount
                         food_plots[f].set_facecolor('orange') # mark food as found
                         ants[ant, 4] = 1 # ant starts following marker A
-                        ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the nest
-                        ants[ant, 5] = 1 # resets the ant's drop rate
-                        found = True
+                        ants[ant, 2:4] = -ants[ant, 2:4]
+                        ants[ant, 5] = 1
+                        ants[ant, 6] = 1 # resets the ant's sensitivity to ensure it can follow the marker back to the nest
                         break
 
             if not found: # updates the ant's direction based on the current grid markers
-                getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, detection_range)
+                getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, decay_rates, detection_range)
 
             new_x = ants[ant, 0] + ants[ant, 2] # calculates new ant position
             new_y = ants[ant, 1] + ants[ant, 3]
@@ -146,16 +166,25 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
                 grid_marks[int(ants[ant, 0]), int(ants[ant, 1]), 1] += ants[ant, 5] # marker B
             else: # if the ant is moving randomly or following marker B (i.e. searching for food)
                 grid_marks[int(ants[ant, 0]), int(ants[ant, 1]), 0] += ants[ant, 5] # marker A
+            
             ants[ant, 5] = max(decay_rates[1], ants[ant, 5] - decay_rates[1]) # applies drop rate decay
+            if ants[ant, 4] != 1: # if the ant is not currently following marker A back to the nest with food
+                ants[ant, 6] = max(0, ants[ant, 6] - decay_rates[2]) # applies sensitivity decay
 
-        # updates the marker plots and removes markers with strength < 0.1 to improve visibility (this threshold can be adjusted)
-        marks_plot_A.set_data(np.ma.masked_where(temp_grid_marks[:, :, 0].T < 0.1, grid_marks[:, :, 0].T)) # marker A
-        marks_plot_B.set_data(np.ma.masked_where(temp_grid_marks[:, :, 1].T < 0.1, grid_marks[:, :, 1].T)) # marker B
+        # updates the marker plots and removes markers with strength < 0.01 to improve visibility
+        marks_plot_A.set_data(np.ma.masked_where(temp_grid_marks[:, :, 0].T < 0.01, grid_marks[:, :, 0].T)) # marker A
+        marks_plot_B.set_data(np.ma.masked_where(temp_grid_marks[:, :, 1].T < 0.01, grid_marks[:, :, 1].T)) # marker B
         step_counter.set_text(f'Step {frame+1}')
-        ant_counter.set_text(f'Ants: {ants_int}')
+        ant_counter.set_text(f'Ants: {ants_act}')
 
         grid_marks[:] = grid_marks*decay_rates[0] # applies decay rate to all markers
         return marks_plot_A, marks_plot_B, step_counter, ant_counter
+
+    pause = False
+    def onClick(event): # function to pause the animation when the plot is clicked
+        nonlocal pause
+        pause ^= True
+    fig.canvas.mpl_connect('button_press_event', onClick)
 
     ani = animation.FuncAnimation(fig, update, frames=steps, interval=50, blit=False, repeat=False) # 50ms between frames
     plt.show()
