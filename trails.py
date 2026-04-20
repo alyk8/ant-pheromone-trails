@@ -2,6 +2,8 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.colors import LogNorm
+import matplotlib.lines as mlines
 from configparser import ConfigParser
 
 def initialise(directions):
@@ -27,7 +29,7 @@ def initialise(directions):
     ants_dirs = np.array([random.choice(directions) for _ in range(ants_pop[0])], dtype=np.float32) # each ant is given a random starting direction
     ants_mark = np.zeros(ants_pop[0], dtype=np.float32) # which marker the ant is currently following (0 if not following any marker)
     ants_drop = np.ones(ants_pop[0], dtype=np.float32) # how much marker the ant will drop at each step
-    ants_sens = np.ones(ants_pop[0], dtype=np.float32) # how sensitive the ant is to the markers
+    ants_sens = np.full(ants_pop[0], fill_value=0.99, dtype=np.float32) # how sensitive the ant is to the markers
     ants_act = np.zeros(ants_pop[0], dtype=np.float32) # whether the ant is active
     ants_act[:ants_pop[1]] = 1 # initialise the first 'scout_ants' as active
     ants = np.column_stack((ants_locs, ants_dirs, ants_mark, ants_drop, ants_sens, ants_act)) # [x, y, dx, dy, marker, drop_rate, sensitivity, active]
@@ -75,7 +77,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
     ax.set_xlim(0, grid_size[0])
     ax.set_ylim(0, grid_size[1])
-    ax.scatter(nest_loc[0], nest_loc[1], color='b', marker='x', s=50, linewidth=2, label='Nest') # plots the nest location
+    ax.scatter(nest_loc[0], nest_loc[1], color='magenta', marker='x', s=100, linewidth=2, label='Nest') # plots the nest location
     step_counter = fig.text(0.01, 0.01, 'Step 0', fontsize=12)
     ant_counter = fig.text(0.88, 0.01, 'Ants: 0', fontsize=12)
 
@@ -86,26 +88,41 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
             label = 'Food'
         food_plots[f] = ax.scatter(food_locs[f, 0], food_locs[f, 1], color='g', marker='o', s=50, linewidth=1, label=label)
     
-    def format_coord(x, y): # changes the coordinate readout to integers (shows when hovering over the grid)
-        return 'x =% 2.0f, y =% 2.0f' % (x, y)
+    def format_coord(x, y): # shows location, marker strength and food level when hovering over the plot
+        xi, yi = int(round(x)), int(round(y))
+        base = 'x=%d, y=%d' % (xi, yi)
+        if 0 <= xi < grid_size[0] and 0 <= yi < grid_size[1]:
+            a = grid_marks[xi, yi, 0]
+            b = grid_marks[xi, yi, 1]
+            if a > 0.01 or b > 0.01:
+                base += '  A=%.2f, B=%.2f' % (a, b)
+        for f in range(food_num):
+            if abs(xi - int(food_locs[f, 0])) <= 1 and abs(yi - int(food_locs[f, 1])) <= 1:
+                base += '  Food: %.0f%%' % (food_locs[f, 2] * 100)
+                break
+        return base
     ax.format_coord = format_coord
 
     fig.suptitle('Ant Simulation – Basic Active Walkers', fontweight ="bold")
-    fig.legend(loc='outside lower center', ncol=2)
+    found_handle = mlines.Line2D([], [], color='gold', marker='o', linestyle='None', markersize=6, label='Discovered')
+    depleted_handle = mlines.Line2D([], [], color='red', marker='o', linestyle='None', markersize=6, label='Depleted')
+    fig.legend(loc='outside lower center', ncol=4, handles=[*ax.get_legend_handles_labels()[0], found_handle, depleted_handle])
 
-    marks_plot_A = ax.imshow(np.zeros(grid_size), cmap='Blues', alpha=0.7, vmin=0, vmax=1) # markers with strength > 1 will be darkest blue
+    marks_plot_A = ax.imshow(np.zeros(grid_size), cmap='Blues', alpha=0.6, norm=LogNorm(vmin=0.1, vmax=10)) # logarithmic scale
+    marks_plot_A.set_mouseover(False)
     cbar_A = fig.colorbar(marks_plot_A, ax=ax) # adds colour scale for marker A
     cbar_A.set_label('Marker A')
 
-    marks_plot_B = ax.imshow(np.zeros(grid_size), cmap='Oranges', alpha=0.7, vmin=0, vmax=1)
+    marks_plot_B = ax.imshow(np.zeros(grid_size), cmap='Oranges', alpha=0.6, norm=LogNorm(vmin=0.1, vmax=10))
+    marks_plot_B.set_mouseover(False)
     cbar_B = fig.colorbar(marks_plot_B, ax=ax) # adds colour scale for marker B
     cbar_B.set_label('Marker B')
 
     ants_act = ants_pop[1].copy() # number of active ants
-    ani_ref = [None]
+    food_returned = 0 # amount of food successfully returned to the nest
 
     def update(frame): # moves ants by a biased random walk
-        nonlocal ants_act # allows the function to modify these variables defined in the outer scope
+        nonlocal ants_act, food_returned # allows the function to modify these variables defined in the outer scope
         if pause: return # pauses the animation when clicked
         temp_grid_marks = grid_marks.copy() # temp grid to ensure concurrent movement, i.e. ants don't react to markers dropped in the same step
         
@@ -113,7 +130,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
             if ants[ant, 7] == 0: # inactive ant
                 continue
             elif ants[ant, 6] < 0.5: # removes ants with low sensitivity
-                ants[ant] = [nest_loc[0], nest_loc[1], 0, 0, 0, 1, 1, 0] # resets all other values to default
+                ants[ant] = [nest_loc[0], nest_loc[1], 0, 0, 0, 1, 0.99, 0] # resets values: [x, y, dx, dy, marker, drop_rate, sensitivity, active]
                 ants_act -= 1
                 continue
 
@@ -121,6 +138,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
             if (int(ants[ant, 4]) == 1) and (abs(int(ants[ant, 0]) - int(nest_loc[0])) <= 1) and (abs(int(ants[ant, 1]) - int(nest_loc[1])) <= 1): # if the ant is within 1 grid space of the nest with food
                 print('Ant', ant, 'returned to nest with food at step', frame)
                 found = True
+                food_returned += food_step
                 ants[ant, 4] = 2 # ant starts following marker B
                 ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the nest
                 ants[ant, 5] = 1 # resets the ant's drop rate
@@ -141,13 +159,13 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
                         found = True
                         food_locs[f, 2] = max(0, food_locs[f, 2] - food_step) # reduces the food level by a fixed amount
                         if food_locs[f, 2] == 0:
-                            food_plots[f].set_facecolor('red') # mark food as empty
+                            food_plots[f].set(facecolor='red', edgecolor='red') # mark food as empty
                         else:
-                            food_plots[f].set_facecolor('yellow') # mark food as found
+                            food_plots[f].set(facecolor='gold', edgecolor='gold') # mark food as found
                         ants[ant, 4] = 1 # ant starts following marker A
                         ants[ant, 2:4] = -ants[ant, 2:4]
                         ants[ant, 5] = 1
-                        ants[ant, 6] = 1 # resets the ant's sensitivity to ensure it can follow the marker back to the nest
+                        ants[ant, 6] = 0.99 # resets the ant's sensitivity to ensure it can follow the marker back to the nest
                         break
 
             if not found: # updates the ant's direction based on the current grid markers
@@ -170,14 +188,14 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
                 ants[ant, 6] = max(0, ants[ant, 6] - decay_rates[2]) # applies sensitivity decay
 
         # updates the marker plots and removes markers with strength < 0.01 to improve visibility
-        marks_plot_A.set_data(np.ma.masked_where(temp_grid_marks[:, :, 0].T < 0.01, grid_marks[:, :, 0].T)) # marker A
-        marks_plot_B.set_data(np.ma.masked_where(temp_grid_marks[:, :, 1].T < 0.01, grid_marks[:, :, 1].T)) # marker B
+        marks_plot_A.set_data(np.ma.masked_where(temp_grid_marks[:, :, 0].T < 0.05, grid_marks[:, :, 0].T)) # marker A
+        marks_plot_B.set_data(np.ma.masked_where(temp_grid_marks[:, :, 1].T < 0.05, grid_marks[:, :, 1].T)) # marker B
         step_counter.set_text(f'Step {frame+1}')
         ant_counter.set_text(f'Ants: {ants_act}')
 
         grid_marks[:] = grid_marks*(1 - decay_rates[0]) # applies decay rate to all markers
 
-        if ants_act == 0:
+        if ants_act == 0: # stops animation if ants become extinct :(
             ani_ref[0].event_source.stop()
 
         return marks_plot_A, marks_plot_B, step_counter, ant_counter
@@ -188,6 +206,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         pause ^= True
     fig.canvas.mpl_connect('button_press_event', onClick)
 
+    ani_ref = [None]
     ani_ref[0] = animation.FuncAnimation(fig, update, frames=steps, interval=50, blit=False, repeat=False)
     plt.show()
 
