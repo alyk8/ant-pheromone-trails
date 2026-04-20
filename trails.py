@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.colors import LogNorm
 import matplotlib.lines as mlines
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from configparser import ConfigParser
 
 def initialise(directions):
@@ -74,12 +75,27 @@ def getNewDirection(ant, ants, grid_size, temp_grid_marks, directions, alpha, de
             ants[ant, 2:4] = random.choice(dirs) # chooses a random direction from the remaining options
 
 def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, detection_range, directions):
-    fig, ax = plt.subplots(figsize=(8, 6), layout='constrained')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    fig.canvas.manager.set_window_title('Ant Pheromone Trails Simulation')
+    divider = make_axes_locatable(ax)
+    ax_cbar_B = divider.append_axes('left', size='5%', pad=0.5)
+    ax_cbar_A = divider.append_axes('left', size='5%', pad=0.8)
+    ax_prog = divider.append_axes('right', size='10%', pad=0.5)
+
     ax.set_xlim(0, grid_size[0])
     ax.set_ylim(0, grid_size[1])
     ax.scatter(nest_loc[0], nest_loc[1], color='magenta', marker='x', s=100, linewidth=2, label='Nest') # plots the nest location
     step_counter = fig.text(0.01, 0.01, 'Step 0', fontsize=12)
-    ant_counter = fig.text(0.88, 0.01, 'Ants: 0', fontsize=12)
+    ant_counter = fig.text(0.9, 0.01, 'Ants: 0', fontsize=12)
+
+    ax_prog.set_xlim(-0.5, 0.5) # creates a bar plot to show the percentage of food returned to the nest
+    ax_prog.set_ylim(0, 100)
+    ax_prog.set_xticks([])
+    ax_prog.yaxis.set_label_position('right')
+    ax_prog.yaxis.tick_right()
+    ax_prog.set_ylabel('Food returned (%)')
+    prog_bar = ax_prog.bar([0], [0], color='limegreen', width=1)[0]
+    prog_text = ax_prog.text(0, 2, '0%', ha='center', va='bottom', fontsize=10)
 
     food_plots = np.zeros(food_num, dtype=object) # stores the plot objects for the food sources to allow updating their colour when food is found
     for f in range(food_num): # adds food locations to the plot
@@ -87,7 +103,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         if f == 0: # only adds label for the first food source to avoid duplicates in the legend
             label = 'Food'
         food_plots[f] = ax.scatter(food_locs[f, 0], food_locs[f, 1], color='g', marker='o', s=50, linewidth=1, label=label)
-    
+
     def format_coord(x, y): # shows location, marker strength and food level when hovering over the plot
         xi, yi = int(round(x)), int(round(y))
         base = 'x=%d, y=%d' % (xi, yi)
@@ -103,20 +119,25 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         return base
     ax.format_coord = format_coord
 
-    fig.suptitle('Ant Simulation – Basic Active Walkers', fontweight ="bold")
-    found_handle = mlines.Line2D([], [], color='gold', marker='o', linestyle='None', markersize=6, label='Discovered')
+    fig.suptitle('Ant Simulation – Basic Active Walkers', fontweight='bold')
+    found_handle = mlines.Line2D([], [], color='gold', marker='o', linestyle='None', markersize=6, label='Discovered') # custom legend for food sources
     depleted_handle = mlines.Line2D([], [], color='red', marker='o', linestyle='None', markersize=6, label='Depleted')
-    fig.legend(loc='outside lower center', ncol=4, handles=[*ax.get_legend_handles_labels()[0], found_handle, depleted_handle])
+    fig.legend(loc='lower center', ncol=4, handles=[*ax.get_legend_handles_labels()[0], found_handle, depleted_handle])
+    fig.subplots_adjust(bottom=0.11, top=0.93)
 
     marks_plot_A = ax.imshow(np.zeros(grid_size), cmap='Blues', alpha=0.6, norm=LogNorm(vmin=0.1, vmax=10)) # logarithmic scale
     marks_plot_A.set_mouseover(False)
-    cbar_A = fig.colorbar(marks_plot_A, ax=ax) # adds colour scale for marker A
+    cbar_A = fig.colorbar(marks_plot_A, cax=ax_cbar_A)
     cbar_A.set_label('Marker A')
+    ax_cbar_A.yaxis.set_label_position('left')
+    ax_cbar_A.yaxis.tick_left()
 
     marks_plot_B = ax.imshow(np.zeros(grid_size), cmap='Oranges', alpha=0.6, norm=LogNorm(vmin=0.1, vmax=10))
     marks_plot_B.set_mouseover(False)
-    cbar_B = fig.colorbar(marks_plot_B, ax=ax) # adds colour scale for marker B
+    cbar_B = fig.colorbar(marks_plot_B, cax=ax_cbar_B)
     cbar_B.set_label('Marker B')
+    ax_cbar_B.yaxis.set_label_position('left')
+    ax_cbar_B.yaxis.tick_left()
 
     ants_act = ants_pop[1].copy() # number of active ants
     food_returned = 0 # amount of food successfully returned to the nest
@@ -131,14 +152,18 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
                 continue
             elif ants[ant, 6] < 0.5: # removes ants with low sensitivity
                 ants[ant] = [nest_loc[0], nest_loc[1], 0, 0, 0, 1, 0.99, 0] # resets values: [x, y, dx, dy, marker, drop_rate, sensitivity, active]
-                ants_act -= 1
+                if ants_act < 5:
+                    ants[ant, 2:4] = random.choice(directions) # assign valid direction before reactivating
+                    ants[ant, 7] = 1 # reactivates the ant if the population is too low
+                else:
+                    ants_act -= 1
                 continue
 
             found = False # if the ant has found food or returned to nest
             if (int(ants[ant, 4]) == 1) and (abs(int(ants[ant, 0]) - int(nest_loc[0])) <= 1) and (abs(int(ants[ant, 1]) - int(nest_loc[1])) <= 1): # if the ant is within 1 grid space of the nest with food
-                print('Ant', ant, 'returned to nest with food at step', frame)
                 found = True
                 food_returned += food_step
+                print('Ant', ant, 'returned to nest with food at step', frame, '- food returned:', '%.1f%%' % (100*food_returned/food_num))
                 ants[ant, 4] = 2 # ant starts following marker B
                 ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the nest
                 ants[ant, 5] = 1 # resets the ant's drop rate
@@ -192,10 +217,14 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         marks_plot_B.set_data(np.ma.masked_where(temp_grid_marks[:, :, 1].T < 0.05, grid_marks[:, :, 1].T)) # marker B
         step_counter.set_text(f'Step {frame+1}')
         ant_counter.set_text(f'Ants: {ants_act}')
+        pct = 100*food_returned/food_num # calculates percentage of food returned to the nest
+        prog_bar.set_height(pct)
+        prog_text.set_text('%.1f%%' % pct)
+        prog_text.set_position((0, min(pct + 2, 95)))
 
         grid_marks[:] = grid_marks*(1 - decay_rates[0]) # applies decay rate to all markers
 
-        if ants_act == 0: # stops animation if ants become extinct :(
+        if (ants_act == 0) or (pct == 100): # stops animation if ants become extinct or find all the food
             ani_ref[0].event_source.stop()
 
         return marks_plot_A, marks_plot_B, step_counter, ant_counter
@@ -207,7 +236,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     fig.canvas.mpl_connect('button_press_event', onClick)
 
     ani_ref = [None]
-    ani_ref[0] = animation.FuncAnimation(fig, update, frames=steps, interval=50, blit=False, repeat=False)
+    ani_ref[0] = animation.FuncAnimation(fig, update, frames=steps, interval=0, blit=False, repeat=False)
     plt.show()
 
 def getForwardDirections(current_dir, directions, detection_range=3): # returns the directions that the ant can detect
