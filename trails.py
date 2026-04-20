@@ -202,7 +202,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
             ants[ant, 0] = max(0, min(new_x, grid_size[0] - 1)) # keeps ant within grid boundaries
             ants[ant, 1] = max(0, min(new_y, grid_size[1] - 1))
 
-            # drops markers, may increase above 1 but this is capped in the plot
+            # drops markers, capped at 10 in the plot
             if int(ants[ant, 4]) == 1: # if the ant is following marker A (i.e. it has found food and is heading back to the nest)
                 grid_marks[int(ants[ant, 0]), int(ants[ant, 1]), 1] += ants[ant, 5] # marker B
             else: # if the ant is moving randomly or following marker B (i.e. searching for food)
