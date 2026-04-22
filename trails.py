@@ -6,18 +6,20 @@ from matplotlib.colors import LogNorm
 import matplotlib.lines as mlines
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from configparser import ConfigParser
+from numba import njit
+import time
 
 def initialise(directions):
     config = ConfigParser()
     config.read('config.ini') # reads in values from config file
 
-    grid_size = np.array([int(config.get('trails', 'grid_size_x')), int(config.get('trails', 'grid_size_y'))], dtype=np.uint32)
+    grid_size = np.array([int(config.get('trails', 'grid_size_x')), int(config.get('trails', 'grid_size_y'))], dtype=np.uint16)
     grid_marks = np.zeros(shape=(grid_size[0], grid_size[1], 2), dtype=np.float32) # outbound pheromone
     nest_loc = np.array([(grid_size[0]*int(config.get('trails', 'nest_loc_x')))//100,
-                        (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint32)
+                        (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint16)
 
     food_num = int(config.get('trails', 'food_num')) # no. of food sources
-    food_locs = np.zeros(shape = [food_num, 3], dtype = np.float32) # stores locs of food sources + their level
+    food_locs = np.zeros(shape = [food_num, 3], dtype=np.float32) # stores locs of food sources + their level
     for f in range(food_num):
         # ensures the food is not placed too close to the nest (i.e. within 5% of the grid size)
         food_locs[f, 0] = random.choice([random.randint(0, int(nest_loc[0]*0.95)), random.randint(int(nest_loc[0]*1.05), grid_size[0])])
@@ -27,7 +29,9 @@ def initialise(directions):
     
     ants_pop = np.array([int(config.get('trails', 'ants_num')), int(config.get('trails', 'scout_ants')), int(config.get('trails', 'recruitment_rate'))]) # ant population size, initial number of scout ants, recruitment rate
     ants_locs = np.full(shape=(ants_pop[0], 2), fill_value=nest_loc, dtype=np.float32) # start all ants at the nest
-    ants_dirs = np.array([random.choice(directions) for _ in range(ants_pop[0])], dtype=np.float32) # each ant is given a random starting direction
+    ants_dirs = np.zeros((ants_pop[0], 2), dtype=np.float32) # each ant is given a random starting direction
+    for i in range(ants_pop[0]):
+        ants_dirs[i] = directions[random.randint(0, 7)]
     ants_mark = np.zeros(ants_pop[0], dtype=np.float32) # which marker the ant is currently following (0 if not following any marker)
     ants_drop = np.ones(ants_pop[0], dtype=np.float32) # how much marker the ant will drop at each step
     ants_sens = np.full(ants_pop[0], fill_value=0.99, dtype=np.float32) # how sensitive the ant is to the markers
@@ -45,40 +49,88 @@ def initialise(directions):
 
     return grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, detection_range, steps, steps_per_frame, visualise
 
+@njit
 def get_new_direction(ant, ants, grid_size, temp_grid_marks, directions, alpha, forward_map):
-    dirs = [] # stores all possible new directions (i.e. those that are within the grid boundaries and not blocked by food or the nest)
-    forward_dirs = [] # stores valid forward directions
-    current_dir = tuple(ants[ant, 2:4]) # ant's current direction
-    markers = [] # stores the directions and strengths of detected markers
-    detects = forward_map[current_dir] # gets the forward directions once
+    ant_x = int(ants[ant, 0]) # ant's current position
+    ant_y = int(ants[ant, 1])
+    curr_dx = int(ants[ant, 2]) # ant's current direction
+    curr_dy = int(ants[ant, 3])
+
+    curr_dir_idx = 0
+    for i in range(8):
+        if directions[i, 0] == curr_dx and directions[i, 1] == curr_dy:
+            curr_dir_idx = i
+            break
+    detects = forward_map[curr_dir_idx] # gets the forward directions once
     target_marker = max(0, int(ants[ant, 4]) - 1) # which marker the ant is currently following (A or B) 
 
-    for dir in directions:
-        x = int(ants[ant, 0] + dir[0])
-        y = int(ants[ant, 1] + dir[1])
-        if (0 <= x < grid_size[0]) and (0 <= y < grid_size[1]):
-            if dir in detects: # if it's in the ant's field of detection
-                strength = temp_grid_marks[x, y, target_marker] # gets strength of marker
-                if strength > 0.01:
-                    markers.append([dir, strength]) # adds location and strength of marker
-                elif dir != current_dir: # if no marker and not current direction
-                    forward_dirs.append(dir)
-            else: # if it's not in the ant's field of detection
-                dirs.append(dir)
-    
-    if (len(markers) > 0) and (random.random() < ants[ant, 6]): # if the ant detects markers and is sensitive enough to react to them
-        if len(markers) == 1: # if only one marker is detected, the ant will choose that direction
-            ants[ant, 2:4] = markers[0][0]
-        else: # if multiple markers are detected, the ant chooses the strongest one
-            max_strength = max([m[1] for m in markers]) # finds the absolute highest marker strength in the ant's field of view
-            best_dirs = [m[0] for m in markers if m[1] == max_strength] # find all directions that share this max strength
-            ants[ant, 2:4] = random.choice(best_dirs) # choose randomly among the tied best directions
-    elif random.random() < alpha: # with probability alpha, the ant changes direction randomly
-        if len(forward_dirs) > 0: # if there are valid forward directions (i.e. within the ant's field of detection)
-            ants[ant, 2:4] = random.choice(forward_dirs)
-        elif len(dirs) > 0: # if the ant is stuck in a corner
-            ants[ant, 2:4] = random.choice(dirs) # chooses a random direction from the remaining options
+    marker_dirs = np.zeros(8, dtype=np.int8) # stores the number, directions and strengths of detected markers
+    marker_strengths = np.zeros(8, dtype=np.float32)
+    num_markers = 0
 
+    forward_dirs = np.zeros(8, dtype=np.int8) # stores valid forward directions
+    num_forward = 0
+
+    dirs = np.zeros(8, dtype=np.int8) # stores all other possible new directions
+    num_dirs = 0
+
+    for d in range(8):
+        dx, dy = directions[d, 0], directions[d, 1]
+        x = ant_x + dx # calculates the next space if the ant moves in direction dx, dy
+        y = ant_y + dy
+
+        if (0 <= x < grid_size[0]) and (0 <= y < grid_size[1]):
+            forward = False # if direction 'd' is in the ant's field of detection
+            for j in range(len(detects)):
+                if d == detects[j]:
+                    forward = True
+                    break
+
+            if forward:
+                strength = temp_grid_marks[x, y, target_marker] # gets strength of marker in direction d
+                if strength > 0.01:
+                    marker_dirs[num_markers] = d # stores direction and strength of marker
+                    marker_strengths[num_markers] = strength
+                    num_markers += 1
+                elif d != curr_dir_idx: # if no marker and not current direction
+                    forward_dirs[num_forward] = d
+                    num_forward += 1
+            else: # if it's not in the ant's field of detection
+                dirs[num_dirs] = d
+                num_dirs += 1
+    
+    if (num_markers > 0) and (np.random.random() < ants[ant, 6]): # if the ant detects markers and is sensitive enough to react to them
+        if num_markers == 1: # if only one marker is detected, the ant will choose that direction
+            idx = marker_dirs[0] # gets index of marker in directions array
+            ants[ant, 2] = directions[idx, 0]
+            ants[ant, 3] = directions[idx, 1]
+        else: # if multiple markers are detected, the ant chooses the strongest one
+            max_strength = marker_strengths[0] # finds the max strength of a marker
+            for m in range(1, num_markers):
+                if marker_strengths[m] > max_strength:
+                    max_strength = marker_strengths[m]
+
+            best_dirs = np.zeros(8, dtype=np.uint32) # find all directions that share this max strength
+            num_best = 0
+            for m in range(num_markers):
+                if marker_strengths[m] == max_strength:
+                    best_dirs[num_best] = marker_dirs[m]
+                    num_best += 1
+
+            idx = best_dirs[np.random.randint(0, num_best)] # chooses randomly among the tied best directions
+            ants[ant, 2] = directions[idx, 0]
+            ants[ant, 3] = directions[idx, 1]
+    elif random.random() < alpha: # with probability alpha, the ant changes direction randomly
+        if num_forward > 0: # if there are valid forward directions (i.e. within the ant's field of detection)
+            idx = forward_dirs[np.random.randint(0, num_forward)]
+            ants[ant, 2] = directions[idx, 0]
+            ants[ant, 3] = directions[idx, 1]
+        elif num_dirs > 0: # if the ant is stuck in a corner
+            idx = dirs[np.random.randint(0, num_dirs)] # chooses a random direction from the remaining options
+            ants[ant, 2] = directions[idx, 0]
+            ants[ant, 3] = directions[idx, 1]
+
+@njit
 def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map): # moves all ants by exactly one step
     temp_grid_marks = grid_marks.copy() # temp grid to ensure concurrent movement, i.e. ants don't react to markers dropped in the same step
     
@@ -86,10 +138,12 @@ def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food
         if ants[ant, 7] == 0: # inactive ant
             continue
         elif ants[ant, 6] < 0.5: # removes ants with low sensitivity
-            ants[ant] = [nest_loc[0], nest_loc[1], 0, 0, 0, 1, 0.99, 0, -1] # resets values: [x, y, dx, dy, marker, drop_rate, sensitivity, active, food]
+            ants[ant, :] = np.array([nest_loc[0], nest_loc[1], 0, 0, 0, 1, 0.99, 0, -1], dtype=np.float32) # resets values: [x, y, dx, dy, marker, drop_rate, sensitivity, active, food]
             if ants_act <= ants_pop[1]:
-                ants[ant, 2:4] = random.choice(directions) # assign valid direction before reactivating
-                ants[ant, 7] = 1 # reactivates the ant if the population is too low
+                idx = np.random.randint(0, 8) # assign a random direction before reactivating
+                ants[ant, 2] = directions[idx, 0]
+                ants[ant, 3] = directions[idx, 1]
+                ants[ant, 7] = 1.0 # reactivates the ant if the population is too low
             else:
                 ants_act -= 1
             continue
@@ -100,13 +154,15 @@ def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food
             food_returned += food_step
             #print('Ant', ant, 'returned to nest with food at step', frame, '- food returned:', '%.1f%%' % (100*food_returned/food_num))
             ants[ant, 4] = 2 # ant starts following marker B
-            ants[ant, 2:4] = -ants[ant, 2:4] # reverses the ant's direction to head back towards the nest
+            ants[ant, 2] = -ants[ant, 2] # reverses the ant's direction to head back towards the nest
+            ants[ant, 3] = -ants[ant, 3]
             ants[ant, 5] = 1 # resets the ant's drop rate
             for _ in range(ants_pop[2]): # recruits more ants when an ant successfully returns to the nest with food
                 if ants_act < ants_pop[0]: # checks if the total number of ants has not been exceeded
                     for x in range(ants_pop[0]): # finds an inactive ant to recruit
                         if ants[x, 7] == 0:
-                            ants[x, 2:4] = ants[ant, 2:4] # same direction as food
+                            ants[x, 2] = ants[ant, 2] # same direction as food
+                            ants[x, 3] = ants[ant, 3]
                             ants[x, 4] = 2 # follows marker B
                             ants[x, 7] = 1 # activates the ant
                             ants_act += 1
@@ -118,8 +174,9 @@ def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food
                     #print('Ant', ant, 'found food at', food_locs[f, 0:2], 'with level', str(round(food_locs[f, 2], 2)), 'at step', frame)
                     found = True
                     food_locs[f, 2] = max(0, food_locs[f, 2] - food_step) # reduces the food level by a fixed amount
+                    ants[ant, 2] = -ants[ant, 2]
+                    ants[ant, 3] = -ants[ant, 3]
                     ants[ant, 4] = 1 # ant starts following marker A
-                    ants[ant, 2:4] = -ants[ant, 2:4]
                     ants[ant, 5] = 1
                     ants[ant, 6] = 0.99 # resets the ant's sensitivity to ensure it can follow the marker back to the nest
                     ants[ant, 8] = f # stores which food source the ant is carrying
@@ -144,7 +201,8 @@ def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food
         if ants[ant, 4] != 1: # if the ant is not currently following marker A back to the nest with food
             ants[ant, 6] = max(0, ants[ant, 6] - decay_rates[2]) # applies sensitivity decay
 
-    grid_marks[:] = grid_marks*(1 - decay_rates[0]) # applies decay rate to all markers
+    grid_marks[:, :, 0] *= (1 - decay_rates[0]) # applies decay rate to all markers
+    grid_marks[:, :, 1] *= (1 - decay_rates[0])
     
     return food_returned, ants_act
 
@@ -223,11 +281,11 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         if pause: return # pauses the animation when clicked
 
         for _ in range(steps_per_frame):
-            current_step += 1
             food_returned, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
             pct = min(100, 100*food_returned/food_num) # calculates percentage of food returned to the nest
             if (ants_act == 0) or (pct == 100): # breaks out of the loop if the simulation is finished
                 break
+        current_step += steps_per_frame
         
         for f in range(food_num):
             if food_locs[f, 2] == 0:
@@ -263,41 +321,48 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     fig.canvas.mpl_connect('button_press_event', onClick)
 
     ani_ref = [None]
-    ani_ref[0] = animation.FuncAnimation(fig, update, frames=steps, interval=300, blit=False, repeat=False)
+    repeats = steps // steps_per_frame - 1
+    ani_ref[0] = animation.FuncAnimation(fig, update, frames=repeats, interval=300, blit=False, repeat=False)
     plt.show()
 
+@njit
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
-    ants_act = ants_pop[1].copy() # number of active ants
+    ants_act = ants_pop[1]
     food_returned = 0 # amount of food successfully returned to the nest
 
-    for _ in range(steps):
+    for step in range(steps):
         food_returned, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
         pct = min(100, 100*food_returned/food_num) # calculates percentage of food returned to the nest
 
         if (ants_act == 0) or (pct == 100): # breaks out of the loop if the simulation is finished
             break
+    
+    return step
 
-def precompute_forward_dirs(directions, detection_range=3): # pre-computes the forward directions once
-    forward_map = {}
+@njit
+def precompute_forward_dirs(detection_range=5): # returns an array of the indices of the forward directions
+    forward_map = np.zeros((8, detection_range), dtype=np.int32)
     half_range = (detection_range - 1) // 2
 
-    for dir in directions:
-        detects = []
-        idx = directions.index(dir)
-        for d in range(-half_range, half_range + 1): # iterates through the indices of the directions in range
-            detects.append(directions[(idx + d) % len(directions)]) # adds direction to the detects array, using modulo for wrap-around
-        forward_map[dir] = detects
-
+    for i in range(8):
+        col = 0
+        for d in range(-half_range, half_range + 1): 
+            forward_map[i, col] = (i + d) % 8 
+            col += 1
+            
     return forward_map
 
 def main():
-    directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] # the 8 possible movement directions (excluding [0,0])
+    directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
     grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, detection_range, steps, steps_per_frame, visualise = initialise(directions)
-    forward_map = precompute_forward_dirs(directions, detection_range)
-    
+    forward_map = precompute_forward_dirs(detection_range)
+
     if visualise:
         grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, steps_per_frame, directions, forward_map)
     else:
-        no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map)
+        start = time.time()
+        total_steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map)
+        end = time.time()
+        print('Steps:', total_steps, 'in', round(end - start, 2), 'seconds')
 
 main()
