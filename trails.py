@@ -19,12 +19,13 @@ def initialise(directions):
                         (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint16)
 
     food_num = int(config.get('trails', 'food_num')) # no. of food sources
-    food_locs = np.zeros(shape = [food_num, 3], dtype=np.float32) # stores locs of food sources + their level
+    food_locs = np.array([[34, 88, 1], [70, 87, 1], [13, 37, 1], [50, 15, 1], [88, 40, 1]], dtype=np.float32)
+    '''food_locs = np.zeros(shape = [food_num, 3], dtype=np.float32) # stores locs of food sources + their level
     for f in range(food_num):
         # ensures the food is not placed too close to the nest (i.e. within 5% of the grid size)
         food_locs[f, 0] = random.choice([random.randint(0, int(nest_loc[0]*0.95)), random.randint(int(nest_loc[0]*1.05), grid_size[0])])
         food_locs[f, 1] = random.choice([random.randint(0, int(nest_loc[1]*0.95)), random.randint(int(nest_loc[1]*1.05), grid_size[1])])
-        food_locs[f, 2] = 1 # diminishing supply (scale from 0-1)
+        food_locs[f, 2] = 1 # diminishing supply (scale from 0-1)'''
     food_step = float(config.get('trails', 'food_step')) # how much food can an ant eat at once
     
     ants_pop = np.array([int(config.get('trails', 'ants_num')), int(config.get('trails', 'scout_ants')), int(config.get('trails', 'recruitment_rate'))]) # ant population size, initial number of scout ants, recruitment rate
@@ -325,17 +326,47 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     ani_ref[0] = animation.FuncAnimation(fig, update, frames=repeats, interval=300, blit=False, repeat=False)
     plt.show()
 
-@njit
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
     ants_act = ants_pop[1]
     food_returned = 0 # amount of food successfully returned to the nest
+    active_ants_history = [] # tracks active ants at each step
+    remaining_food_history = [] # tracks remaining food percentage at each step
+    step_history = [] # tracks step numbers
 
     for step in range(steps):
         food_returned, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
         pct = min(100, 100*food_returned/food_num) # calculates percentage of food returned to the nest
+        remaining_food_pct = sum(food_locs[:, 2]) * 100 / food_num  # percentage of total remaining food
+        
+        # Track active ants and remaining food history
+        active_ants_history.append(ants_act)
+        remaining_food_history.append(remaining_food_pct)
+        step_history.append(step + 1)
 
         if (ants_act == 0) or (pct == 100): # breaks out of the loop if the simulation is finished
             break
+    
+    # Plot active ants vs time and remaining food percentage after simulation
+    fig, ax1 = plt.subplots(figsize=(8, 6))
+    ax1.plot(step_history, active_ants_history, color='purple', linewidth=2, label='Active Ants')
+    ax1.set_xlabel('Steps')
+    ax1.set_ylabel('Active Ants', color='purple')
+    ax1.tick_params(axis='y', labelcolor='purple')
+    ax1.set_title('Active Ants and Remaining Food Over Time')
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(0, max(step_history))
+
+    ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+    ax2.plot(step_history, remaining_food_history, color='green', linewidth=2, label='Remaining Food (%)')
+    ax2.set_ylabel('Remaining Food (%)', color='green')
+    ax2.tick_params(axis='y', labelcolor='green')
+
+    # Combine legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+
+    plt.show()
     
     return step
 
