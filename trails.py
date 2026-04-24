@@ -1,4 +1,3 @@
-import random
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -7,32 +6,39 @@ import matplotlib.lines as mlines
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from configparser import ConfigParser
 from numba import njit
-import time
+import tqdm
 
-def initialise(directions):
+def getConfigValues(): # gets parameters from config file
     config = ConfigParser()
     config.read('config.ini') # reads in values from config file
 
     grid_size = np.array([int(config.get('trails', 'grid_size_x')), int(config.get('trails', 'grid_size_y'))], dtype=np.uint16)
-    grid_marks = np.zeros(shape=(grid_size[0], grid_size[1], 2), dtype=np.float32) # outbound pheromone
-    nest_loc = np.array([(grid_size[0]*int(config.get('trails', 'nest_loc_x')))//100,
-                        (grid_size[1]*int(config.get('trails', 'nest_loc_y')))//100], dtype=np.uint16)
+    nest_loc = np.array([int(config.get('trails', 'nest_loc_x')), int(config.get('trails', 'nest_loc_y'))], dtype=np.uint16)
 
-    food_num = int(config.get('trails', 'food_num')) # no. of food sources
-    food_locs = np.array([[34, 88, 1], [70, 87, 1], [13, 37, 1], [50, 15, 1], [88, 40, 1]], dtype=np.float32)
-    '''food_locs = np.zeros(shape = [food_num, 3], dtype=np.float32) # stores locs of food sources + their level
-    for f in range(food_num):
-        # ensures the food is not placed too close to the nest (i.e. within 5% of the grid size)
-        food_locs[f, 0] = random.choice([random.randint(0, int(nest_loc[0]*0.95)), random.randint(int(nest_loc[0]*1.05), grid_size[0])])
-        food_locs[f, 1] = random.choice([random.randint(0, int(nest_loc[1]*0.95)), random.randint(int(nest_loc[1]*1.05), grid_size[1])])
-        food_locs[f, 2] = 1 # diminishing supply (scale from 0-1)'''
-    food_step = float(config.get('trails', 'food_step')) # how much food can an ant eat at once
-    
     ants_pop = np.array([int(config.get('trails', 'ants_num')), int(config.get('trails', 'scout_ants')), int(config.get('trails', 'recruitment_rate'))]) # ant population size, initial number of scout ants, recruitment rate
+
+    alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
+    detection_range = int(config.get('trails', 'detection_range')) # how many directions the ant can detect
+    decay_rates = np.array([float(config.get('trails', 'marker_decay_rate')), float(config.get('trails', 'drop_rate_decay')), float(config.get('trails', 'sensitivity_decay'))], dtype=np.float32) # marker, drop rate and sensitivity decay rates
+    
+    food_num = int(config.get('trails', 'food_num')) # no. of food sources
+    food_info = np.array([int(config.get('trails', 'food_mode')), int(config.get('trails', 'food_min')), int(config.get('trails', 'food_max'))], dtype=np.uint16) # [food mode, min dist, max dist] 1 = fixed food source, 2 = varied food source
+    food_step = float(config.get('trails', 'food_step')) # how much food an ant can eat at once
+
+    steps = int(config.get('trails', 'steps')) # no. of steps to simulate
+    visualise = config.getboolean('trails', 'visualise')
+    steps_per_frame = int(config.get('trails', 'speed')) # animation speed
+    sims = int(config.get('trails', 'simulations')) # no. of simulations to run
+
+    return grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, steps, visualise, steps_per_frame, sims
+
+def initialise(grid_size, nest_loc, ants_pop, directions): # sets up the grid and ants
+    grid_marks = np.zeros(shape=(grid_size[0], grid_size[1], 2), dtype=np.float32) # outbound pheromone
+    
     ants_locs = np.full(shape=(ants_pop[0], 2), fill_value=nest_loc, dtype=np.float32) # start all ants at the nest
     ants_dirs = np.zeros((ants_pop[0], 2), dtype=np.float32) # each ant is given a random starting direction
     for i in range(ants_pop[0]):
-        ants_dirs[i] = directions[random.randint(0, 7)]
+        ants_dirs[i] = directions[np.random.randint(0, 8)]
     ants_mark = np.zeros(ants_pop[0], dtype=np.float32) # which marker the ant is currently following (0 if not following any marker)
     ants_drop = np.ones(ants_pop[0], dtype=np.float32) # how much marker the ant will drop at each step
     ants_sens = np.full(ants_pop[0], fill_value=0.99, dtype=np.float32) # how sensitive the ant is to the markers
@@ -41,14 +47,28 @@ def initialise(directions):
     ants_food_id = np.full(ants_pop[0], fill_value=-1, dtype=np.float32) # which food source the ant is currently carrying (-1 if none)
     ants = np.column_stack((ants_locs, ants_dirs, ants_mark, ants_drop, ants_sens, ants_act, ants_food_id)) # [x, y, dx, dy, marker, drop_rate, sensitivity, active, food_id]
 
-    alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
-    decay_rates = np.array([float(config.get('trails', 'marker_decay_rate')), float(config.get('trails', 'drop_rate_decay')), float(config.get('trails', 'sensitivity_decay'))], dtype=np.float32) # marker, drop rate and sensitivity decay rates
-    detection_range = int(config.get('trails', 'detection_range')) # how many directions the ant can detect
-    steps = int(config.get('trails', 'steps')) # no. of steps to simulate
-    steps_per_frame = int(config.get('trails', 'speed')) # animation speed
-    visualise = config.getboolean('trails', 'visualise')
+    return grid_marks, ants
 
-    return grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, detection_range, steps, steps_per_frame, visualise
+def get_food_locs(grid_size, nest_loc, food_num, food_mode, food_min, food_max, sims): # generates food locations
+    food_locs = np.zeros(shape=(sims, food_num, 3), dtype=np.float32) # stores food
+    food_locs[:, :, 2] = 1.0 # sets food supply to 100%
+
+    if food_mode == 1: # same food locations for every sim
+        thetas = np.random.uniform(0, 2*np.pi, food_num)
+        rs = np.random.uniform(food_min, food_max, food_num)
+
+        # gets x and y coordinates and ensures they are on the grid
+        food_locs[:, :, 0] = np.clip(nest_loc[0] + rs*np.cos(thetas), 0, grid_size[0] - 1).astype(int)
+        food_locs[:, :, 1] = np.clip(nest_loc[1] + rs*np.sin(thetas), 0, grid_size[1] - 1).astype(int)
+
+    elif food_mode == 2: # different food locations per sim
+        thetas = np.random.uniform(0, 2*np.pi, (sims, food_num)) # different thetas + rs for each sim
+        rs = np.random.uniform(food_min, food_max, (sims, food_num))
+
+        food_locs[:, :, 0] = np.clip(nest_loc[0] + rs*np.cos(thetas), 0, grid_size[0] - 1).astype(int)
+        food_locs[:, :, 1] = np.clip(nest_loc[1] + rs*np.sin(thetas), 0, grid_size[1] - 1).astype(int)
+
+    return food_locs
 
 @njit
 def get_new_direction(ant, ants, grid_size, temp_grid_marks, directions, alpha, forward_map):
@@ -121,7 +141,7 @@ def get_new_direction(ant, ants, grid_size, temp_grid_marks, directions, alpha, 
             idx = best_dirs[np.random.randint(0, num_best)] # chooses randomly among the tied best directions
             ants[ant, 2] = directions[idx, 0]
             ants[ant, 3] = directions[idx, 1]
-    elif random.random() < alpha: # with probability alpha, the ant changes direction randomly
+    elif np.random.random() < alpha: # with probability alpha, the ant changes direction randomly
         if num_forward > 0: # if there are valid forward directions (i.e. within the ant's field of detection)
             idx = forward_dirs[np.random.randint(0, num_forward)]
             ants[ant, 2] = directions[idx, 0]
@@ -326,28 +346,29 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     ani_ref[0] = animation.FuncAnimation(fig, update, frames=repeats, interval=300, blit=False, repeat=False)
     plt.show()
 
+@njit
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
     ants_act = ants_pop[1]
     food_returned = 0 # amount of food successfully returned to the nest
-    active_ants_history = [] # tracks active ants at each step
-    remaining_food_history = [] # tracks remaining food percentage at each step
-    step_history = [] # tracks step numbers
+    #active_ants_history = [] # tracks active ants at each step
+    #remaining_food_history = [] # tracks remaining food percentage at each step
+    #step_history = [] # tracks step numbers
 
     for step in range(steps):
         food_returned, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
         pct = min(100, 100*food_returned/food_num) # calculates percentage of food returned to the nest
-        remaining_food_pct = sum(food_locs[:, 2]) * 100 / food_num  # percentage of total remaining food
+        #remaining_food_pct = sum(food_locs[:, 2]) * 100 / food_num  # percentage of total remaining food
         
         # Track active ants and remaining food history
-        active_ants_history.append(ants_act)
-        remaining_food_history.append(remaining_food_pct)
-        step_history.append(step + 1)
+        #active_ants_history.append(ants_act)
+        #remaining_food_history.append(remaining_food_pct)
+        #step_history.append(step + 1)
 
         if (ants_act == 0) or (pct == 100): # breaks out of the loop if the simulation is finished
             break
     
     # Plot active ants vs time and remaining food percentage after simulation
-    fig, ax1 = plt.subplots(figsize=(8, 6))
+    """fig, ax1 = plt.subplots(figsize=(8, 6))
     ax1.plot(step_history, active_ants_history, color='purple', linewidth=2, label='Active Ants')
     ax1.set_xlabel('Steps')
     ax1.set_ylabel('Active Ants', color='purple')
@@ -366,7 +387,7 @@ def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ant
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
 
-    plt.show()
+    plt.show()"""
     
     return step
 
@@ -384,16 +405,32 @@ def precompute_forward_dirs(detection_range=5): # returns an array of the indice
     return forward_map
 
 def main():
+    grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, steps, visualise, steps_per_frame, sims = getConfigValues()
+
     directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
-    grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, detection_range, steps, steps_per_frame, visualise = initialise(directions)
-    forward_map = precompute_forward_dirs(detection_range)
+    forward_map = precompute_forward_dirs(detection_range) # computes forward directions for all points once
+    
+    grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+    food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
 
     if visualise:
-        grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, steps_per_frame, directions, forward_map)
+        grid(grid_size, grid_marks, nest_loc, food_num, food_locs[0], food_step, ants_pop, ants, alpha, decay_rates, steps, steps_per_frame, directions, forward_map)
     else:
-        start = time.time()
-        total_steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map)
-        end = time.time()
-        print('Steps:', total_steps, 'in', round(end - start, 2), 'seconds')
+        no_of_steps = np.zeros(sims, dtype=np.uint32)
+        with tqdm.tqdm(total = sims, desc='Simulations') as pbar:
+            for s in range(sims):
+                grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+                no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map)
+                pbar.update()
+
+        print('Min:', np.min(no_of_steps))
+        print('Max:', np.max(no_of_steps))
+        print('Avg:', int(np.mean(no_of_steps)))
+        print('Std:', int(np.std(no_of_steps)))
+        
+        plt.hist(no_of_steps, bins=50, edgecolor='black')
+        plt.xlabel('Total no. of steps to get all food')
+        plt.ylabel('Frequency')
+        plt.show()
 
 main()
