@@ -7,6 +7,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from configparser import ConfigParser
 from numba import njit
 import tqdm
+import time
 
 def getConfigValues(): # gets parameters from config file
     config = ConfigParser()
@@ -51,24 +52,42 @@ def initialise(grid_size, nest_loc, ants_pop, directions): # sets up the grid an
 
     return grid_marks, ants
 
-def get_food_locs(grid_size, nest_loc, food_num, food_mode, food_min, food_max, sims): # generates food locations
+def get_food_loc(grid_size, nest_loc, food_num, food_min, food_max, min_sep=5): # generates valid food locations for one simulation
+    accepted = np.zeros(shape=(food_num, 2), dtype=np.int16)
+    count = 0
+
+    while count < food_num:
+        # chooses a random direction and distance from nest
+        theta = np.random.uniform(0, 2*np.pi)
+        r = np.random.uniform(food_min, food_max)
+
+        # gets x and y coords of food location (and keeps it on the grid)
+        x = int(np.clip(nest_loc[0] + r*np.cos(theta), 0, grid_size[0] - 1))
+        y = int(np.clip(nest_loc[1] + r*np.sin(theta), 0, grid_size[1] - 1))
+
+        # checks if food location is valid (i.e. not within 5 grid spaces of another food location)
+        if all(np.hypot(x - ax, y - ay) >= min_sep for ax, ay in accepted):
+            accepted[count] = np.array([x, y])
+            count += 1
+
+    return accepted
+
+def get_food_locs(grid_size, nest_loc, food_num, food_mode, food_min, food_max, sims): # generates food locations for all simulations
     food_locs = np.zeros(shape=(sims, food_num, 3), dtype=np.float32) # stores food
     food_locs[:, :, 2] = 1.0 # sets food supply to 100%
 
     if food_mode == 1: # same food locations for every sim
-        thetas = np.random.uniform(0, 2*np.pi, food_num)
-        rs = np.random.uniform(food_min, food_max, food_num)
-
-        # gets x and y coordinates and ensures they are on the grid
-        food_locs[:, :, 0] = np.clip(nest_loc[0] + rs*np.cos(thetas), 0, grid_size[0] - 1).astype(int)
-        food_locs[:, :, 1] = np.clip(nest_loc[1] + rs*np.sin(thetas), 0, grid_size[1] - 1).astype(int)
+        locs = get_food_loc(grid_size, nest_loc, food_num, food_min, food_max)
+        for i, (x, y) in enumerate(locs):
+            food_locs[:, i, 0] = x
+            food_locs[:, i, 1] = y
 
     elif food_mode == 2: # different food locations per sim
-        thetas = np.random.uniform(0, 2*np.pi, (sims, food_num)) # different thetas + rs for each sim
-        rs = np.random.uniform(food_min, food_max, (sims, food_num))
-
-        food_locs[:, :, 0] = np.clip(nest_loc[0] + rs*np.cos(thetas), 0, grid_size[0] - 1).astype(int)
-        food_locs[:, :, 1] = np.clip(nest_loc[1] + rs*np.sin(thetas), 0, grid_size[1] - 1).astype(int)
+        for s in range(sims):
+            locs = get_food_loc(grid_size, nest_loc, food_num, food_min, food_max)
+            for i, (x, y) in enumerate(locs):
+                food_locs[s, i, 0] = x
+                food_locs[s, i, 1] = y
 
     return food_locs
 
@@ -357,14 +376,15 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
 @njit
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
     ants_act = ants_pop[1]
-    food_returned = 0 # amount of food successfully returned to the nest
+    food_returned = np.zeros(4, dtype=np.float32) # [found, % found, returned, % returned]
     #active_ants_history = [] # tracks active ants at each step
     #remaining_food_history = [] # tracks remaining food percentage at each step
     #step_history = [] # tracks step numbers
 
     for step in range(steps):
         food_returned, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
-        pct = min(100, 100*food_returned/food_num) # calculates percentage of food returned to the nest
+        food_returned[1] = min(100, 100*food_returned[0]/food_num)
+        food_returned[3] = min(100, 100*food_returned[2]/food_num)
         #remaining_food_pct = sum(food_locs[:, 2]) * 100 / food_num  # percentage of total remaining food
         
         # Track active ants and remaining food history
@@ -372,7 +392,7 @@ def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ant
         #remaining_food_history.append(remaining_food_pct)
         #step_history.append(step + 1)
 
-        if (ants_act == 0) or (pct == 100): # breaks out of the loop if the simulation is finished
+        if (ants_act == 0) or (food_returned[3] >= 100): # breaks out of the loop if the simulation is finished
             break
     
     # Plot active ants vs time and remaining food percentage after simulation
