@@ -15,14 +15,16 @@ def getConfigValues(): # gets parameters from config file
     grid_size = np.array([int(config.get('trails', 'grid_size_x')), int(config.get('trails', 'grid_size_y'))], dtype=np.uint16)
     nest_loc = np.array([int(config.get('trails', 'nest_loc_x')), int(config.get('trails', 'nest_loc_y'))], dtype=np.uint16)
 
-    ants_pop = np.array([int(config.get('trails', 'ants_num')), int(config.get('trails', 'scout_ants')), int(config.get('trails', 'recruitment_rate'))]) # ant population size, initial number of scout ants, recruitment rate
+    # [ant population size, initial number of scout ants, recruitment rate]
+    ants_pop = np.array([int(config.get('trails', 'ants_num')), int(config.get('trails', 'scout_ants')), int(config.get('trails', 'recruitment_rate'))])
 
     alpha = float(config.get('trails', 'alpha')) # persistence parameter (i.e. probability that the ant will change direction)
     detection_range = int(config.get('trails', 'detection_range')) # how many directions the ant can detect
     decay_rates = np.array([float(config.get('trails', 'marker_decay_rate')), float(config.get('trails', 'drop_rate_decay')), float(config.get('trails', 'sensitivity_decay'))], dtype=np.float32) # marker, drop rate and sensitivity decay rates
     
     food_num = int(config.get('trails', 'food_num')) # no. of food sources
-    food_info = np.array([int(config.get('trails', 'food_mode')), int(config.get('trails', 'food_min')), int(config.get('trails', 'food_max'))], dtype=np.uint16) # [food mode, min dist, max dist] 1 = fixed food source, 2 = varied food source
+    # [food mode, min dist, max dist] where food_mode 1 = fixed food source, 2 = varied food source
+    food_info = np.array([int(config.get('trails', 'food_mode')), int(config.get('trails', 'food_min')), int(config.get('trails', 'food_max'))], dtype=np.uint16)
     food_step = float(config.get('trails', 'food_step')) # how much food an ant can eat at once
 
     steps = int(config.get('trails', 'steps')) # no. of steps to simulate
@@ -71,7 +73,7 @@ def get_food_locs(grid_size, nest_loc, food_num, food_mode, food_min, food_max, 
     return food_locs
 
 @njit
-def get_new_direction(ant, ants, grid_size, temp_grid_marks, directions, alpha, forward_map):
+def get_new_direction(ant, ants, grid_size, temp_grid_marks, directions, alpha, forward_map): # chooses next direction for an ant to move
     ant_x = int(ants[ant, 0]) # ant's current position
     ant_y = int(ants[ant, 1])
     curr_dx = int(ants[ant, 2]) # ant's current direction
@@ -152,7 +154,7 @@ def get_new_direction(ant, ants, grid_size, temp_grid_marks, directions, alpha, 
             ants[ant, 3] = directions[idx, 1]
 
 @njit
-def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map): # moves all ants by exactly one step
+def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_found, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map): # moves all ants by exactly one step
     temp_grid_marks = grid_marks.copy() # temp grid to ensure concurrent movement, i.e. ants don't react to markers dropped in the same step
     
     for ant in range(ants_pop[0]): # moves all ants one step
@@ -172,7 +174,7 @@ def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food
         found = False # if the ant has found food or returned to nest
         if (ants[ant, 4] == 1) and (abs(ants[ant, 0] - nest_loc[0]) <= 1) and (abs(ants[ant, 1] - nest_loc[1]) <= 1): # if the ant is within 1 grid space of the nest with food
             found = True
-            food_returned += food_step
+            food_found[2] += food_step # updates total food returned
             #print('Ant', ant, 'returned to nest with food at step', frame, '- food returned:', '%.1f%%' % (100*food_returned/food_num))
             ants[ant, 4] = 2 # ant starts following marker B
             ants[ant, 2] = -ants[ant, 2] # reverses the ant's direction to head back towards the nest
@@ -195,6 +197,7 @@ def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food
                     #print('Ant', ant, 'found food at', food_locs[f, 0:2], 'with level', str(round(food_locs[f, 2], 2)), 'at step', frame)
                     found = True
                     food_locs[f, 2] = max(0, food_locs[f, 2] - food_step) # reduces the food level by a fixed amount
+                    food_found[0] += food_step # updates total found food
                     ants[ant, 2] = -ants[ant, 2]
                     ants[ant, 3] = -ants[ant, 3]
                     ants[ant, 4] = 1 # ant starts following marker A
@@ -225,10 +228,10 @@ def simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food
     grid_marks[:, :, 0] *= (1 - decay_rates[0]) # applies decay rate to all markers
     grid_marks[:, :, 1] *= (1 - decay_rates[0])
     
-    return food_returned, ants_act
+    return food_found, ants_act
 
-def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, steps_per_frame, directions, forward_map):
-    fig, ax = plt.subplots(figsize=(10, 6))
+def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, steps_per_frame, directions, forward_map): # visualisation
+    fig, ax = plt.subplots(figsize=(10, 6)) # sets up grid
     fig.canvas.manager.set_window_title('Ant Pheromone Trails Simulation')
     divider = make_axes_locatable(ax)
     ax_cbar_B = divider.append_axes('left', size='5%', pad=0.5)
@@ -241,14 +244,16 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     step_counter = fig.text(0.01, 0.01, 'Step 0', fontsize=12)
     ant_counter = fig.text(0.9, 0.01, 'Ants: 0', fontsize=12)
 
-    ax_prog.set_xlim(-0.5, 0.5) # creates a bar plot to show the percentage of food returned to the nest
+    ax_prog.set_xlim(-0.5, 0.5) # bar chart to show the percentage of food food/returned to the nest
     ax_prog.set_ylim(0, 100)
     ax_prog.set_xticks([])
     ax_prog.yaxis.set_label_position('right')
     ax_prog.yaxis.tick_right()
-    ax_prog.set_ylabel('Food returned (%)')
-    prog_bar = ax_prog.bar([0], [0], color='limegreen', width=1)[0]
-    prog_text = ax_prog.text(0, 2, '0%', ha='center', va='bottom', fontsize=10)
+    ax_prog.set_ylabel('Food found/returned (%)')
+    prog_bar = ax_prog.bar([0], [0], color='limegreen', width=1)[0] # shows % of food found by ants
+    ret_line = ax_prog.axhline(y=0, color='red', linewidth=2) # shows % of food returned to the nest
+    found_text = ax_prog.text(0, 2, '0%', ha='center', va='bottom', fontsize=9)
+    ret_text = ax_prog.text(0, -10, '0%', ha='center', va='top', fontsize=8, color='red')
 
     food_plots = np.zeros(food_num, dtype=object) # stores the plot objects for the food sources to allow updating their colour when food is found
     for f in range(food_num): # adds food locations to the plot
@@ -293,18 +298,18 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     ax_cbar_B.yaxis.tick_left()
 
     ants_act = ants_pop[1].copy() # number of active ants
-    food_returned = 0 # amount of food successfully returned to the nest
+    food_found = np.zeros(4, dtype=np.float32) # [found, % found, returned, % returned]
     current_step = 0
-    pct = 0 # percentage of food returned to the nest
 
     def update(frame):
-        nonlocal ants_act, food_returned, current_step, pct
+        nonlocal ants_act, food_found, current_step
         if pause: return # pauses the animation when clicked
 
         for _ in range(steps_per_frame):
-            food_returned, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
-            pct = min(100, 100*food_returned/food_num) # calculates percentage of food returned to the nest
-            if (ants_act == 0) or (pct == 100): # breaks out of the loop if the simulation is finished
+            food_found, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_found, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
+            food_found[1] = min(100, 100*food_found[0]/food_num) # calculates % of food found by ants
+            food_found[3] = min(100, 100*food_found[2]/food_num) # calculates % of food returned to the nest
+            if (ants_act == 0) or (food_found[3] >= 100): # breaks out of the loop if the simulation is finished
                 break
         current_step += steps_per_frame
         
@@ -326,11 +331,14 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
         step_counter.set_text(f'Step {current_step}')
         ant_counter.set_text(f'Ants: {ants_act}')
         
-        prog_bar.set_height(pct)
-        prog_text.set_text('%.1f%%' % pct)
-        prog_text.set_position((0, min(pct + 2, 95)))
+        prog_bar.set_height(food_found[1]) # updates bar chart with food found + returned %
+        found_text.set_text('%.1f%%' % food_found[1])
+        found_text.set_position((0, min(food_found[1] + 2, 95)))
+        ret_line.set_ydata([food_found[3], food_found[3]])
+        ret_text.set_text('%.1f%%' % food_found[3])
+        ret_text.set_position((0, min(food_found[3] - 2, 93)))
 
-        if (ants_act == 0) or (pct == 100): # stops animation if ants become extinct or find all the food
+        if (ants_act == 0) or (food_found[3] >= 100): # stops animation if ants become extinct or find all the food
             ani_ref[0].event_source.stop()
 
         return marks_plot_A, marks_plot_B, step_counter, ant_counter
