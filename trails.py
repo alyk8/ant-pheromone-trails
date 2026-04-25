@@ -7,7 +7,6 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from configparser import ConfigParser
 from numba import njit
 import tqdm
-import time
 
 def getConfigValues(): # gets parameters from config file
     config = ConfigParser()
@@ -28,12 +27,13 @@ def getConfigValues(): # gets parameters from config file
     food_info = np.array([int(config.get('trails', 'food_mode')), int(config.get('trails', 'food_min')), int(config.get('trails', 'food_max'))], dtype=np.uint16)
     food_step = float(config.get('trails', 'food_step')) # how much food an ant can eat at once
 
-    steps = int(config.get('trails', 'steps')) # no. of steps to simulate
-    visualise = config.getboolean('trails', 'visualise')
+    max_steps = int(config.get('trails', 'steps')) # no. of steps to simulate
+    animation = config.getboolean('trails', 'animation')
+    show_graphs = config.getboolean('trails', 'show_graphs')
     steps_per_frame = int(config.get('trails', 'speed')) # animation speed
     sims = int(config.get('trails', 'simulations')) # no. of simulations to run
 
-    return grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, steps, visualise, steps_per_frame, sims
+    return grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims
 
 def initialise(grid_size, nest_loc, ants_pop, directions): # sets up the grid and ants
     grid_marks = np.zeros(shape=(grid_size[0], grid_size[1], 2), dtype=np.float32) # outbound pheromone
@@ -90,6 +90,19 @@ def get_food_locs(grid_size, nest_loc, food_num, food_mode, food_min, food_max, 
                 food_locs[s, i, 1] = y
 
     return food_locs
+
+@njit
+def precompute_forward_dirs(detection_range=5): # returns an array of the indices of the forward directions
+    forward_map = np.zeros((8, detection_range), dtype=np.int32)
+    half_range = (detection_range - 1) // 2
+
+    for i in range(8):
+        col = 0
+        for d in range(-half_range, half_range + 1): 
+            forward_map[i, col] = (i + d) % 8 
+            col += 1
+            
+    return forward_map
 
 @njit
 def get_new_direction(ant, ants, grid_size, temp_grid_marks, directions, alpha, forward_map): # chooses next direction for an ant to move
@@ -318,19 +331,26 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
 
     ants_act = ants_pop[1].copy() # number of active ants
     food_found = np.zeros(4, dtype=np.float32) # [found, % found, returned, % returned]
+    history = np.zeros(shape=(steps, 2), dtype=np.float32) # [active ants, remaining food]
     current_step = 0
 
     def update(frame):
-        nonlocal ants_act, food_found, current_step
+        nonlocal ants_act, food_found, history, current_step
         if pause: return # pauses the animation when clicked
 
         for _ in range(steps_per_frame):
             food_found, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_found, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
+            
             food_found[1] = min(100, 100*food_found[0]/food_num) # calculates % of food found by ants
             food_found[3] = min(100, 100*food_found[2]/food_num) # calculates % of food returned to the nest
+
+            # tracks active ants and remaining food
+            history[current_step, 0] = ants_act
+            history[current_step, 1] = 100 - food_found[1]
+            current_step += 1
+            
             if (ants_act == 0) or (food_found[3] >= 100): # breaks out of the loop if the simulation is finished
                 break
-        current_step += steps_per_frame
         
         for f in range(food_num):
             if food_locs[f, 2] == 0:
@@ -373,67 +393,55 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
     ani_ref[0] = animation.FuncAnimation(fig, update, frames=repeats, interval=300, blit=False, repeat=False)
     plt.show()
 
+    return history[:current_step + 1], current_step
+
 @njit
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
     ants_act = ants_pop[1]
-    food_returned = np.zeros(4, dtype=np.float32) # [found, % found, returned, % returned]
-    #active_ants_history = [] # tracks active ants at each step
-    #remaining_food_history = [] # tracks remaining food percentage at each step
-    #step_history = [] # tracks step numbers
+    food_found = np.zeros(4, dtype=np.float32) # [found, % found, returned, % returned]
+    history = np.zeros(shape=(steps, 2), dtype=np.float32) # [active ants, remaining food]
 
     for step in range(steps):
-        food_returned, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_returned, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
-        food_returned[1] = min(100, 100*food_returned[0]/food_num)
-        food_returned[3] = min(100, 100*food_returned[2]/food_num)
-        #remaining_food_pct = sum(food_locs[:, 2]) * 100 / food_num  # percentage of total remaining food
-        
-        # Track active ants and remaining food history
-        #active_ants_history.append(ants_act)
-        #remaining_food_history.append(remaining_food_pct)
-        #step_history.append(step + 1)
+        food_found, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_found, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
 
-        if (ants_act == 0) or (food_returned[3] >= 100): # breaks out of the loop if the simulation is finished
+        # updates food found + returned percentages
+        food_found[1] = min(100, 100*food_found[0]/food_num)
+        food_found[3] = min(100, 100*food_found[2]/food_num)
+
+        # tracks active ants and remaining food
+        history[step, 0] = ants_act
+        history[step, 1] = 100 - food_found[1]
+
+        if (ants_act == 0) or (food_found[3] >= 100): # breaks out of the loop if the simulation is finished
             break
-    
-    # Plot active ants vs time and remaining food percentage after simulation
-    """fig, ax1 = plt.subplots(figsize=(8, 6))
-    ax1.plot(step_history, active_ants_history, color='purple', linewidth=2, label='Active Ants')
+
+    return history[:step + 1], step
+
+def create_plots(history): # plots active ants + remaining food % vs time
+    steps = np.arange(1, len(history) + 1)
+    fig, ax1 = plt.subplots(figsize=(8, 6))
+    ax1.plot(steps, history[:, 0], color='purple', linewidth=2, label='Active Ants')
     ax1.set_xlabel('Steps')
     ax1.set_ylabel('Active Ants', color='purple')
     ax1.tick_params(axis='y', labelcolor='purple')
     ax1.set_title('Active Ants and Remaining Food Over Time')
+    ax1.set_ylim(bottom=0)
     ax1.grid(True, alpha=0.3)
-    ax1.set_xlim(0, max(step_history))
 
-    ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-    ax2.plot(step_history, remaining_food_history, color='green', linewidth=2, label='Remaining Food (%)')
+    ax2 = ax1.twinx() # instantiate a second axes that shares the same x-axis
+    ax2.plot(steps, history[:, 1], color='green', linewidth=2, label='Remaining Food (%)')
     ax2.set_ylabel('Remaining Food (%)', color='green')
     ax2.tick_params(axis='y', labelcolor='green')
 
-    # Combine legends
-    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines1, labels1 = ax1.get_legend_handles_labels() # combines legends
     lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2)
 
-    plt.show()"""
-    
-    return step
-
-@njit
-def precompute_forward_dirs(detection_range=5): # returns an array of the indices of the forward directions
-    forward_map = np.zeros((8, detection_range), dtype=np.int32)
-    half_range = (detection_range - 1) // 2
-
-    for i in range(8):
-        col = 0
-        for d in range(-half_range, half_range + 1): 
-            forward_map[i, col] = (i + d) % 8 
-            col += 1
-            
-    return forward_map
+    plt.tight_layout()
+    plt.show()
 
 def main():
-    grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, steps, visualise, steps_per_frame, sims = getConfigValues()
+    grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
 
     directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
     forward_map = precompute_forward_dirs(detection_range) # computes forward directions for all points once
@@ -441,24 +449,32 @@ def main():
     grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
     food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
 
-    if visualise:
-        grid(grid_size, grid_marks, nest_loc, food_num, food_locs[0], food_step, ants_pop, ants, alpha, decay_rates, steps, steps_per_frame, directions, forward_map)
+    if animation:
+        history, steps = grid(grid_size, grid_marks, nest_loc, food_num, food_locs[0], food_step, ants_pop, ants, alpha, decay_rates, max_steps, steps_per_frame, directions, forward_map)
+        if show_graphs:
+            create_plots(history)
     else:
         no_of_steps = np.zeros(sims, dtype=np.uint32)
         with tqdm.tqdm(total = sims, desc='Simulations') as pbar:
             for s in range(sims):
                 grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
-                no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map)
+                history, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                if show_graphs and (sims <= 5): # doesn't show graphs if running >5 sims
+                    create_plots(history)
                 pbar.update()
 
-        print('Min:', np.min(no_of_steps))
+        mean = int(np.mean(no_of_steps))
+        print('\nMin:', np.min(no_of_steps))
         print('Max:', np.max(no_of_steps))
-        print('Avg:', int(np.mean(no_of_steps)))
+        print('Avg:', mean)
         print('Std:', int(np.std(no_of_steps)))
-        
-        plt.hist(no_of_steps, bins=50, edgecolor='black')
-        plt.xlabel('Total no. of steps to get all food')
-        plt.ylabel('Frequency')
-        plt.show()
+
+        if show_graphs: # plots histogram of total steps
+            plt.hist(no_of_steps, bins=50, edgecolor='black')
+            plt.axvline(mean, color='red', label=f'Mean: {mean:.0f}') # red line for mean
+            plt.xlabel('Total no. of steps to get all food')
+            plt.ylabel('Frequency')
+            plt.legend()
+            plt.show()
 
 main()
