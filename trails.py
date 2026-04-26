@@ -7,6 +7,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from configparser import ConfigParser
 from numba import njit
 import tqdm
+import csv
+import os
 
 def getConfigValues(): # gets parameters from config file
     config = ConfigParser()
@@ -440,6 +442,63 @@ def create_plots(history): # plots active ants + remaining food % vs time
     plt.tight_layout()
     plt.show()
 
+def alpha(num): # tests the effect of varying alpha from 0-100
+    if not os.path.exists('alpha2.csv'): # writes headers if file does not exist
+        with open('alpha2.csv', 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['alpha', 'steps'])
+
+    grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
+
+    directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
+    forward_map = precompute_forward_dirs(detection_range) # computes forward directions for all points once
+    food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
+
+    print()
+    alphas = np.zeros(num+1)
+    stds = np.zeros(num+1)
+    completion_rates = np.zeros(num+1)
+    with open('alpha2.csv', 'a', newline='') as f:
+        writer = csv.writer(f)
+        with tqdm.tqdm(total=sims*(num+1)) as pbar: # progress bar
+            for a in range(num+1): # for each alpha value
+                alpha = a/num
+                pbar.set_description('alpha = ' + str(alpha))
+                no_of_steps = np.zeros(sims, dtype=np.uint32) # saves no. of steps
+                for s in range(sims):
+                    grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+                    food_locs[s, :, 2] = 1.0 # resets this sim's food supply to 100%
+                    _, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                    writer.writerow([alpha, no_of_steps[s]]) # saves result to file
+                    pbar.update()
+
+                completed = no_of_steps[no_of_steps < max_steps - 1] # stores results where all the food was found (ie <100,000 steps)
+                alphas[a] = int(np.mean(completed)) if len(completed) > 0 else np.nan # calculates the mean for an alpha value
+                stds[a] = np.std(completed) if len(completed) > 0 else 0 # calculates standard deviation
+                completion_rates[a] = (len(completed)/sims)*100 # calculates completion rate %
+
+    print('\n', alphas)
+    alpha_vals = np.arange(num+1)/num
+    fig, ax1 = plt.subplots() # plots avg steps for each alpha value
+    ax1.errorbar(alpha_vals, alphas, yerr=stds, fmt='-o', markersize=3, capsize=3, elinewidth=0.8, color='tab:blue', label='Avg. steps')
+    ax1.set_xlabel('Alpha')
+    ax1.set_ylabel('Avg. steps to collect all food', color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    ax2 = ax1.twinx() # plots completion rate % for each alpha value
+    ax2.plot(alpha_vals, completion_rates, '-s', markersize=3, color='tab:orange', label='Completion rate')
+    ax2.set_ylabel('Completion rate (%)', color='tab:orange')
+    ax2.tick_params(axis='y', labelcolor='tab:orange')
+    ax2.set_ylim(0, 100)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+
+    plt.title('Effect of alpha on foraging efficiency')
+    plt.tight_layout()
+    plt.show()
+
 def main():
     grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
 
@@ -458,6 +517,7 @@ def main():
         with tqdm.tqdm(total = sims, desc='Simulations') as pbar:
             for s in range(sims):
                 grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+                food_locs[:, :, 2] = 1.0 # resets food supply to 100%
                 history, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
                 if show_graphs and (sims <= 5): # doesn't show graphs if running >5 sims
                     create_plots(history)
@@ -478,3 +538,4 @@ def main():
             plt.show()
 
 main()
+# alpha(100)
