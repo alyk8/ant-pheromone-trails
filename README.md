@@ -18,10 +18,10 @@ A Python simulation of emergent ant foraging behaviour using the **Active Random
 ## Requirements
 
 - Python 3.8+
-- `numpy`, `matplotlib`, `numba`
+- `numpy`, `matplotlib`, `numba`, `tqdm`
 
 ```bash
-pip install numpy matplotlib numba
+pip install numpy matplotlib numba tqdm
 ```
 
 ---
@@ -32,14 +32,16 @@ pip install numpy matplotlib numba
 python trails.py
 ```
 
-An animated plot appears showing the two pheromone fields evolving over `steps` timesteps.
+Set `animation = true` in `config.ini` to open an animated plot showing the two pheromone fields evolving over `steps` timesteps.
 
 - **Click** anywhere on the plot to pause/resume
 - **Hover** over cells to inspect marker A/B strengths and food levels
-- The progress bar (right) shows total food returned to the nest as a percentage
+- The progress bar (right) shows total food found and returned to the nest as a percentage
 - The animation stops automatically when all food is collected or all ants go extinct
 
-**Legend:**
+Set `animation = false` to run headlessly across multiple simulations and print summary statistics.
+
+**Legend (animated mode):**
 
 | Colour | Meaning |
 |--------|---------|
@@ -49,8 +51,6 @@ An animated plot appears showing the two pheromone fields evolving over `steps` 
 | Red ● | Food source (depleted) |
 | Blue (log scale) | Marker A — outbound pheromone |
 | Orange (log scale) | Marker B — return pheromone |
-
-Set `visualise = false` in `config.ini` to run headlessly and print elapsed time.
 
 ---
 
@@ -145,17 +145,22 @@ All parameters live in `config.ini`. No code changes are needed.
 | `drop_rate_decay` | `0.01` | Per-step multiplicative decay of each ant's drop rate |
 | `sensitivity_decay` | `0.001` | Per-step linear decay of each ant's pheromone sensitivity |
 | `food_num` | `5` | Number of food sources |
+| `food_mode` | `2` | `1` = same food locations every simulation; `2` = randomised each simulation |
+| `food_min` | `30` | Minimum distance from nest for food placement (grid cells) |
+| `food_max` | `45` | Maximum distance from nest for food placement (grid cells) |
 | `food_step` | `0.01` | Amount of food consumed/returned per interaction |
-| `steps` | `5000` | Number of simulation timesteps |
-| `speed` | `1` | Simulation steps computed per animation frame |
-| `visualise` | `true` | Show animated plot (`false` = headless benchmark) |
+| `steps` | `100000` | Maximum number of simulation timesteps |
+| `animation` | `false` | Show animated plot (`true`) or run headlessly (`false`) |
+| `show_graphs` | `false` | Plot active-ant and remaining-food graphs after each simulation (suppressed if `simulations > 5`) |
+| `speed` | `100` | Simulation steps computed per animation frame |
+| `simulations` | `100` | Number of independent simulations to run (headless mode) |
 
 **Notes:**
 
 - Lower `alpha` → straighter, more persistent walks; higher → more diffuse exploration
 - Lower `marker_decay_rate` → longer-lasting trails; too low relative to ant count prevents stable trails from forming
 - `detection_range` must be odd to ensure symmetry around the ant's heading
-- Food is placed at least 5% of the grid away from the nest on each axis
+- Food is placed at a random angle from the nest, at a distance uniformly drawn from `[food_min, food_max]`, with a minimum separation of 5 cells between sources
 
 ---
 
