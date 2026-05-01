@@ -400,26 +400,27 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
 @njit
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
     ants_act = ants_pop[1]
-    food_found = np.zeros(4, dtype=np.float32) # [found, % found, returned, % returned]
-    history = np.zeros(shape=(steps, 2), dtype=np.float32) # [active ants, remaining food]
+    food_found = np.zeros(shape=(steps, 4), dtype=np.float32) # [found, % found, returned, % returned]
+    history = np.zeros(shape=(steps, 3), dtype=np.float32) # [active ants, remaining food]
 
     for step in range(steps):
-        food_found, ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_found, ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
+        food_found[step], ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_found[max(0, step-1)], ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
 
         # updates food found + returned percentages
-        food_found[1] = min(100, 100*food_found[0]/food_num)
-        food_found[3] = min(100, 100*food_found[2]/food_num)
+        food_found[step, 1] = min(100, 100*food_found[step, 0]/food_num)
+        food_found[step, 3] = min(100, 100*food_found[step, 2]/food_num)
 
         # tracks active ants and remaining food
         history[step, 0] = ants_act
-        history[step, 1] = 100 - food_found[1]
+        history[step, 1] = 100 - food_found[step, 1]
+        history[step, 2] = food_found[step, 1]-food_found[step, 3]
 
-        if (ants_act == 0) or (food_found[3] >= 100): # breaks out of the loop if the simulation is finished
+        if (ants_act == 0) or (food_found[step, 3] >= 100): # breaks out of the loop if the simulation is finished
             break
 
-    return history[:step + 1], step
+    return history[:step + 1], food_found[:step + 1], step
 
-def create_plots(history): # plots active ants + remaining food % vs time
+def create_plots(history, food_found): # plots active ants + remaining food % vs time
     steps = np.arange(1, len(history) + 1)
     fig, ax1 = plt.subplots(figsize=(8, 6))
     ax1.plot(steps, history[:, 0], color='purple', linewidth=2, label='Active Ants')
@@ -433,15 +434,183 @@ def create_plots(history): # plots active ants + remaining food % vs time
     ax2 = ax1.twinx() # instantiate a second axes that shares the same x-axis
     ax2.plot(steps, history[:, 1], color='green', linewidth=2, label='Remaining Food (%)')
     ax2.set_ylabel('Remaining Food (%)', color='green')
+    ax2.set_ylim(bottom=0)
     ax2.tick_params(axis='y', labelcolor='green')
 
     lines1, labels1 = ax1.get_legend_handles_labels() # combines legends
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2)
 
+    plt.tight_layout() 
+    plt.show()
+
+    fig, ax3 = plt.subplots(figsize=(8, 6))
+    ax3.plot(steps, history[:, 0], color='purple', linewidth=2, label='Active Ants')
+    ax3.set_xlabel('Steps')
+    ax3.set_ylabel('Active Ants', color='purple')
+    ax3.tick_params(axis='y', labelcolor='purple')
+    ax3.set_title('Active Ants and Disparity in Found and Collected food')
+    ax3.set_ylim(bottom=0)
+    ax3.grid(True, alpha=0.3)
+
+    ax4 = ax3.twinx() # instantiate a second axes that shares the same x-axis
+    ax4.plot(steps, history[:, 2], color='green', linewidth=2, label='Disparity in Found and Collected food (%)')
+    ax4.set_ylabel('Disparity in Found and Collected food (%)', color='green')
+    ax4.set_ylim(bottom=0)
+    ax4.tick_params(axis='y', labelcolor='green')
+
+    lines3, labels3 = ax3.get_legend_handles_labels() # combines legends
+    lines4, labels4 = ax4.get_legend_handles_labels()
+    ax3.legend(lines3 + lines4, labels3 + labels4, loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2)
+
+    plt.tight_layout() 
+    plt.show()
+
+    steps = np.arange(1, len(history) + 1)
+    fig, ax5 = plt.subplots(figsize=(8, 6))
+    ax5.plot(steps, history[:, 2], color='blue', linewidth=2, label='Disparity in Found and Collected food (%)')
+    ax5.set_ylabel('Disparity in Found and Collected food (%)', color='blue')
+    ax5.set_ylim(bottom=0)
+    ax5.tick_params(axis='y', labelcolor='blue')
+    ax5.set_xlabel('Steps')
+    ax5.set_title('Remaining Food Over Time alongside Disparity in Found and Collected food (%)')
+    ax5.set_ylim(bottom=0)
+    ax5.grid(True, alpha=0.3)
+
+    ax6 = ax5.twinx() # instantiate a second axes that shares the same x-axis
+    ax6.plot(steps, history[:, 1], color='green', linewidth=2, label='Remaining Food (%)')
+    ax6.set_ylabel('Remaining Food (%)', color='green')
+    ax6.set_ylim(bottom=0)
+    ax6.tick_params(axis='y', labelcolor='green')
+
+    lines5, labels5 = ax5.get_legend_handles_labels() # combines legends
+    lines6, labels6 = ax6.get_legend_handles_labels()
+    ax5.legend(lines5 + lines6, labels5 + labels6, loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2)
+    plt.tight_layout() 
+    plt.show()
+
+def nants(min, max, num): # tests the effects of varying the number of ants in the simulation on average completion time
+    if not os.path.exists('nants.csv'): # writes headers if file does not exist
+        with open('nants.csv', 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['nants', 'steps'])
+
+    grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
+
+    directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
+    forward_map = precompute_forward_dirs(detection_range) # computes forward directions for all points once
+    food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
+
+    print()
+    steps_nants = (max-min)//num
+    nants_vals = np.zeros(steps_nants+1)
+    nants = np.zeros(steps_nants+1)
+    stds = np.zeros(steps_nants+1)
+    completion_rates = np.zeros(steps_nants+1)
+    with open('nants.csv', 'a', newline='') as f:
+        writer = csv.writer(f)
+        x = 0
+        with tqdm.tqdm(total=sims*(steps_nants+1)) as pbar: # progress bar
+            for a in range(min,max+num,num): # for each alpha value
+                ants_pop[0] = a
+                nants_vals[x] = a
+                pbar.set_description('number of max ants = ' + str(ants_pop[0]))
+                no_of_steps = np.zeros(sims, dtype=np.uint32) # saves no. of steps
+                for s in range(sims):
+                    grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+                    food_locs[s, :, 2] = 1.0 # resets this sim's food supply to 100%
+                    _, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                    writer.writerow([ants_pop[0], no_of_steps[s]]) # saves result to file
+                    pbar.update()
+
+                completed = no_of_steps[no_of_steps < max_steps - 1] # stores results where all the food was found (ie <100,000 steps)
+                nants[x] = int(np.mean(completed)) if len(completed) > 0 else np.nan # calculates the mean for an alpha value
+                stds[x] = np.std(completed) if len(completed) > 0 else 0 # calculates standard deviation
+                completion_rates[x] = (len(completed)/sims)*100 # calculates completion rate %
+                x = x+1
+
+    print('\n', nants)
+    fig, ax1 = plt.subplots() # plots avg steps for each alpha value
+    ax1.errorbar(nants_vals, nants, yerr=stds, fmt='-o', markersize=3, capsize=3, elinewidth=0.8, color='tab:blue', label='Avg. steps')
+    ax1.set_xlabel('Number of maximum ants')
+    ax1.set_ylabel('Avg. steps to collect all food', color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    ax2 = ax1.twinx() # plots completion rate % for each alpha value
+    ax2.plot(nants_vals, completion_rates, '-s', markersize=3, color='tab:orange', label='Completion rate')
+    ax2.set_ylabel('Completion rate (%)', color='tab:orange')
+    ax2.tick_params(axis='y', labelcolor='tab:orange')
+    ax2.set_ylim(0, 100)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+
+    plt.title('Effect of maximum number of ants on foraging efficiency')
     plt.tight_layout()
     plt.show()
 
+def nscouts(min, max, num): # tests the effects of varying the number of initial scouts in the simulation on average completion time
+    if not os.path.exists('nscouts.csv'): # writes headers if file does not exist
+        with open('nscouts.csv', 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['nscouts', 'steps'])
+
+    grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
+
+    directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
+    forward_map = precompute_forward_dirs(detection_range) # computes forward directions for all points once
+    food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
+
+    print()
+    steps_nscouts = (max-min)//num
+    nscouts_vals = np.zeros(steps_nscouts+1)
+    nants = np.zeros(steps_nscouts+1)
+    stds = np.zeros(steps_nscouts+1)
+    completion_rates = np.zeros(steps_nscouts+1)
+    with open('nscouts.csv', 'a', newline='') as f:
+        writer = csv.writer(f)
+        x = 0
+        with tqdm.tqdm(total=sims*(steps_nscouts+1)) as pbar: # progress bar
+            for a in range(min,max+num,num): # for each alpha value
+                ants_pop[1] = a
+                nscouts_vals[x] = a
+                pbar.set_description('number of scout ants = ' + str(ants_pop[1]))
+                no_of_steps = np.zeros(sims, dtype=np.uint32) # saves no. of steps
+                for s in range(sims):
+                    grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+                    food_locs[s, :, 2] = 1.0 # resets this sim's food supply to 100%
+                    _, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                    writer.writerow([ants_pop[1], no_of_steps[s]]) # saves result to file
+                    pbar.update()
+
+                completed = no_of_steps[no_of_steps < max_steps - 1] # stores results where all the food was found (ie <100,000 steps)
+                nants[x] = int(np.mean(completed)) if len(completed) > 0 else np.nan # calculates the mean for an alpha value
+                stds[x] = np.std(completed) if len(completed) > 0 else 0 # calculates standard deviation
+                completion_rates[x] = (len(completed)/sims)*100 # calculates completion rate %
+                x = x+1
+
+    print('\n', nscouts)
+    fig, ax1 = plt.subplots() # plots avg steps for each alpha value
+    ax1.errorbar(nscouts_vals, nants, yerr=stds, fmt='-o', markersize=3, capsize=3, elinewidth=0.8, color='tab:blue', label='Avg. steps')
+    ax1.set_xlabel('Number of maximum ants')
+    ax1.set_ylabel('Avg. steps to collect all food', color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    ax2 = ax1.twinx() # plots completion rate % for each alpha value
+    ax2.plot(nscouts_vals, completion_rates, '-s', markersize=3, color='tab:orange', label='Completion rate')
+    ax2.set_ylabel('Completion rate (%)', color='tab:orange')
+    ax2.tick_params(axis='y', labelcolor='tab:orange')
+    ax2.set_ylim(0, 100)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+
+    plt.title('Effect of maximum number of ants on foraging efficiency')
+    plt.tight_layout()
+    plt.show()
+    
 def alpha(num): # tests the effect of varying alpha from 0-100
     if not os.path.exists('alpha2.csv'): # writes headers if file does not exist
         with open('alpha2.csv', 'a', newline='') as f:
@@ -468,7 +637,7 @@ def alpha(num): # tests the effect of varying alpha from 0-100
                 for s in range(sims):
                     grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
                     food_locs[s, :, 2] = 1.0 # resets this sim's food supply to 100%
-                    _, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                    _, _, [s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
                     writer.writerow([alpha, no_of_steps[s]]) # saves result to file
                     pbar.update()
 
@@ -515,7 +684,7 @@ def alpha2(): # tests the effect of varying alpha from 0-100
         for s in range(1, sims+1): # for each sim
             grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
             food_locs[s-1, :, 2] = 1.0 # resets this sim's food supply to 100%
-            _, steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s-1], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+            _, _, steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s-1], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
             total += steps
             all_steps[s-1] = steps
             pbar.update()
@@ -546,7 +715,7 @@ def main():
     food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
 
     if animation:
-        history, steps = grid(grid_size, grid_marks, nest_loc, food_num, food_locs[0], food_step, ants_pop, ants, alpha, decay_rates, max_steps, steps_per_frame, directions, forward_map)
+        history, food_found, steps = grid(grid_size, grid_marks, nest_loc, food_num, food_locs[0], food_step, ants_pop, ants, alpha, decay_rates, max_steps, steps_per_frame, directions, forward_map)
         if show_graphs:
             create_plots(history)
     else:
@@ -555,9 +724,9 @@ def main():
             for s in range(sims):
                 grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
                 food_locs[:, :, 2] = 1.0 # resets food supply to 100%
-                history, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                history, food_found, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
                 if show_graphs and (sims <= 5): # doesn't show graphs if running >5 sims
-                    create_plots(history)
+                    create_plots(history, food_found)
                 pbar.update()
 
         mean = int(np.mean(no_of_steps))
@@ -577,3 +746,4 @@ def main():
 main()
 # alpha(100)
 #alpha2()
+# nscouts(20,300,20)
