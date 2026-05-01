@@ -499,6 +499,43 @@ def alpha(num): # tests the effect of varying alpha from 0-100
     plt.tight_layout()
     plt.show()
 
+def alpha2(): # tests the effect of varying alpha from 0-100
+    grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
+
+    directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
+    forward_map = precompute_forward_dirs(detection_range) # computes forward directions for all points once
+    food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
+
+    print()
+    all_steps = np.zeros(sims)
+    averages = np.zeros(sims)
+    std_devs = np.zeros(sims)
+    total = 0
+    with tqdm.tqdm(total=sims, desc="Simulations") as pbar: # progress bar
+        for s in range(1, sims+1): # for each sim
+            grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+            food_locs[s-1, :, 2] = 1.0 # resets this sim's food supply to 100%
+            _, steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s-1], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+            total += steps
+            all_steps[s-1] = steps
+            pbar.update()
+
+            averages[s-1] = total / s
+            std_devs[s-1] = np.std(all_steps[:s])
+
+    print('\n', all_steps)
+
+    plt.figure()
+    plt.plot(range(1, sims + 1), averages)
+    plt.fill_between(range(1, sims + 1), averages - std_devs, averages + std_devs, alpha=0.3, label='±1 std dev')
+    plt.xlabel('No. of simulations')
+    plt.ylabel('Running average steps')
+    plt.ylim(0, 10000)
+    plt.title('Running average steps to collect all food')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 def main():
     grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
 
@@ -539,3 +576,4 @@ def main():
 
 main()
 # alpha(100)
+#alpha2()
