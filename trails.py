@@ -668,7 +668,12 @@ def alpha(num): # tests the effect of varying alpha from 0-100
     plt.tight_layout()
     plt.show()
 
-def alpha2(): # tests the effect of varying alpha from 0-100
+def mean_steps(): # tests the effect of varying alpha from 0-100
+    if not os.path.exists('mean_steps.csv'): # writes headers if file does not exist
+        with open('mean_steps.csv', 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['sim', 'steps', 'mean', 'std'])
+
     grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
 
     directions = np.array([(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)], dtype=np.int32) # the 8 possible directions (exc [0,0])
@@ -687,19 +692,23 @@ def alpha2(): # tests the effect of varying alpha from 0-100
             _, _, steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s-1], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
             total += steps
             all_steps[s-1] = steps
-            pbar.update()
-
             averages[s-1] = total / s
             std_devs[s-1] = np.std(all_steps[:s])
+            pbar.update()
 
-    print('\n', all_steps)
+    max_graph = np.max(averages)
+    with open('mean_steps.csv', 'a', newline='') as f:
+        writer = csv.writer(f)
+        for s in range(sims):
+            writer.writerow([s, all_steps[s], int(averages[s]), int(std_devs[s])]) # saves result to file
+            max_graph = max(max_graph, averages[s] + std_devs[s])
 
     plt.figure()
     plt.plot(range(1, sims + 1), averages)
     plt.fill_between(range(1, sims + 1), averages - std_devs, averages + std_devs, alpha=0.3, label='±1 std dev')
     plt.xlabel('No. of simulations')
     plt.ylabel('Running average steps')
-    plt.ylim(0, 10000)
+    plt.ylim(0, max_graph*1.4)
     plt.title('Running average steps to collect all food')
     plt.legend()
     plt.tight_layout()
@@ -743,7 +752,7 @@ def main():
             plt.legend()
             plt.show()
 
-main()
-# alpha(100)
-#alpha2()
+#main()
+#alpha(100)
+mean_steps()
 # nscouts(20,300,20)
