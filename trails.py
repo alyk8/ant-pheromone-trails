@@ -519,7 +519,7 @@ def nants(min, max, num): # tests the effects of varying the number of ants in t
                 for s in range(sims):
                     grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
                     food_locs[s, :, 2] = 1.0 # resets this sim's food supply to 100%
-                    _, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                    _, _, no_of_steps[s] = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
                     writer.writerow([ants_pop[0], no_of_steps[s]]) # saves result to file
                     pbar.update()
 
@@ -653,6 +653,7 @@ def alpha(num): # tests the effect of varying alpha from 0-100
     ax1.set_xlabel('Alpha')
     ax1.set_ylabel('Avg. steps to collect all food', color='tab:blue')
     ax1.tick_params(axis='y', labelcolor='tab:blue')
+    ax1.set_ylim(bottom=0)
 
     ax2 = ax1.twinx() # plots completion rate % for each alpha value
     ax2.plot(alpha_vals, completion_rates, '-s', markersize=3, color='tab:orange', label='Completion rate')
@@ -672,7 +673,7 @@ def mean_steps(): # tests the effect of varying alpha from 0-100
     if not os.path.exists('mean_steps.csv'): # writes headers if file does not exist
         with open('mean_steps.csv', 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['sim', 'steps', 'mean', 'std'])
+            writer.writerow(['alpha', 'sim', 'steps', 'mean'])
 
     grid_size, nest_loc, ants_pop, alpha, detection_range, decay_rates, food_num, food_info, food_step, max_steps, animation, show_graphs, steps_per_frame, sims = getConfigValues()
 
@@ -680,37 +681,35 @@ def mean_steps(): # tests the effect of varying alpha from 0-100
     forward_map = precompute_forward_dirs(detection_range) # computes forward directions for all points once
     food_locs = get_food_locs(grid_size, nest_loc, food_num, food_info[0], food_info[1], food_info[2], sims)
 
-    print()
-    all_steps = np.zeros(sims)
-    averages = np.zeros(sims)
-    std_devs = np.zeros(sims)
-    total = 0
-    with tqdm.tqdm(total=sims, desc="Simulations") as pbar: # progress bar
-        for s in range(1, sims+1): # for each sim
-            grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
-            food_locs[s-1, :, 2] = 1.0 # resets this sim's food supply to 100%
-            _, _, steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s-1], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
-            total += steps
-            all_steps[s-1] = steps
-            averages[s-1] = total / s
-            std_devs[s-1] = np.std(all_steps[:s])
-            pbar.update()
+    all_steps = np.zeros(shape=(10, sims), dtype=np.uint32)
+    averages = np.zeros(shape=(10, sims), dtype=np.float32)
 
-    max_graph = np.max(averages)
     with open('mean_steps.csv', 'a', newline='') as f:
         writer = csv.writer(f)
-        for s in range(sims):
-            writer.writerow([s, all_steps[s], int(averages[s]), int(std_devs[s])]) # saves result to file
-            max_graph = max(max_graph, averages[s] + std_devs[s])
+        for alpha_num, a in enumerate(range(1, 11)):
+            alpha = a/10
+            total = 0
+            print()
+            with tqdm.tqdm(total=sims, desc="alpha = " + str(alpha)) as pbar: # progress bar
+                for s in range(sims): # for each sim
+                    grid_marks, ants = initialise(grid_size, nest_loc, ants_pop, directions)
+                    food_locs[s, :, 2] = 1.0 # resets this sim's food supply to 100%
+                    _, _, steps = no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs[s], food_step, ants_pop, ants, alpha, decay_rates, max_steps, directions, forward_map)
+                    total += steps
+                    all_steps[alpha_num, s] = steps
+                    averages[alpha_num, s] = total / (s + 1)
+                    writer.writerow([alpha, s, steps, int(total / (s + 1))]) # saves result to file
+                    pbar.update()
 
-    plt.figure()
-    plt.plot(range(1, sims + 1), averages)
-    plt.fill_between(range(1, sims + 1), averages - std_devs, averages + std_devs, alpha=0.3, label='±1 std dev')
-    plt.xlabel('No. of simulations')
-    plt.ylabel('Running average steps')
-    plt.ylim(0, max_graph*1.4)
-    plt.title('Running average steps to collect all food')
-    plt.legend()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    alpha_vals = np.arange(1, 11) / 10
+    for i, a in enumerate(alpha_vals):
+        ax.plot(range(1, sims + 1), averages[i], label=f'α={a:.1f}')
+    ax.set_xlabel('No. of simulations')
+    ax.set_ylabel('Running average steps')
+    ax.set_ylim(bottom=0)
+    ax.set_title('Running average steps to collect all food')
+    ax.legend(title='Alpha', bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     plt.show()
 
@@ -744,7 +743,7 @@ def main():
         print('Avg:', mean)
         print('Std:', int(np.std(no_of_steps)))
 
-        if show_graphs: # plots histogram of total steps
+        if show_graphs and (sims >= 5): # plots histogram of total steps
             plt.hist(no_of_steps, bins=50, edgecolor='black')
             plt.axvline(mean, color='red', label=f'Mean: {mean:.0f}') # red line for mean
             plt.xlabel('Total no. of steps to get all food')
@@ -752,7 +751,7 @@ def main():
             plt.legend()
             plt.show()
 
-#main()
+main()
 #alpha(100)
-mean_steps()
-# nscouts(20,300,20)
+#mean_steps()
+#nants(50,300,50)
