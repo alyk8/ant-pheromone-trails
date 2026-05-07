@@ -401,7 +401,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
     ants_act = ants_pop[1]
     food_found = np.zeros(shape=(steps, 4), dtype=np.float32) # [found, % found, returned, % returned]
-    history = np.zeros(shape=(steps, 3), dtype=np.float32) # [active ants, remaining food]
+    history = np.zeros(shape=(steps,4), dtype=np.float32) # [active ants, remaining food %, disparity, collect food %]
 
     for step in range(steps):
         food_found[step], ants_act = simulate_one_step(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, food_found[max(0, step-1)], ants_pop, ants_act, ants, alpha, decay_rates, directions, forward_map)
@@ -410,10 +410,11 @@ def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ant
         food_found[step, 1] = min(100, 100*food_found[step, 0]/food_num)
         food_found[step, 3] = min(100, 100*food_found[step, 2]/food_num)
 
-        # tracks active ants and remaining food
-        history[step, 0] = ants_act
-        history[step, 1] = 100 - food_found[step, 1]
-        history[step, 2] = food_found[step, 1]-food_found[step, 3]
+        # tracks active ants and remaining food and disparity
+        history[step, 0] = ants_act # history of active ants
+        history[step, 1] = food_found[step, 0] # history of found food
+        history[step, 2] = food_found[step, 1]-food_found[step, 3] # history of disparity
+        history[step, 3] = food_found[step, 2] # history of collected food percentage
 
         if (ants_act == 0) or (food_found[step, 3] >= 100): # breaks out of the loop if the simulation is finished
             break
@@ -489,6 +490,31 @@ def create_plots(history, food_found): # plots active ants + remaining food % vs
     plt.tight_layout() 
     plt.show()
 
+
+    steps = np.arange(1, len(history) + 1)
+    fig, ax7 = plt.subplots(figsize=(8, 6))
+    ax7.plot(steps, history[:, 0], color='blue', linewidth=2, label='Active Ants')
+    ax7.set_ylabel('Active Ants', color='blue')
+    ax7.set_ylim(bottom=0)
+    ax7.tick_params(axis='y', labelcolor='blue')
+    ax7.set_xlabel('Steps')
+    ax7.set_title('Active Ants vs Found Food vs Collected Food')
+    ax7.set_ylim(bottom=0)
+    ax7.grid(True, alpha=0.3)
+
+    ax8 = ax7.twinx() # instantiate a second axes that shares the same x-axis
+    ax8.plot(steps, history[:, 1], color='green', linewidth=2, label='Found Food')
+    ax8.set_ylabel('Food', color='green')
+    ax8.set_ylim(bottom=0)
+    ax8.tick_params(axis='y', labelcolor='green')
+    ax8.plot(steps, history[:, 3], color='orange', linewidth=2, label='Collected Food')
+
+
+    lines7, labels7 = ax7.get_legend_handles_labels() # combines legends
+    lines8, labels8 = ax8.get_legend_handles_labels()
+    ax7.legend(lines7 + lines8, labels7 + labels8, loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=3)
+    plt.tight_layout() 
+    plt.show()
 def nants(min, max, num): # tests the effects of varying the number of ants in the simulation on average completion time
     if not os.path.exists('nants.csv'): # writes headers if file does not exist
         with open('nants.csv', 'a', newline='') as f:
