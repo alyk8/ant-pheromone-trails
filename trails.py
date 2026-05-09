@@ -395,8 +395,8 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
 
     repeats = steps // steps_per_frame - 1
     ani = animation.FuncAnimation(fig, update, frames=repeats, interval=250, blit=False, repeat=False)
-    #if save_animation:
-    #    ani.save('ant_simulation.gif', write='pillow', fps=4)
+    if save_animation:
+        ani.save('ant_simulation.gif', writer='pillow', fps=4)
     plt.show()
 
     return history[:current_step], current_step-1
@@ -404,7 +404,7 @@ def grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_p
 @njit
 def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ants_pop, ants, alpha, decay_rates, steps, directions, forward_map):
     ants_act = ants_pop[1]
-    food_found = np.zeros(shape=(steps, 4), dtype=np.float32) # [found, % found, returned, % returned]
+    food_found = np.zeros(4, dtype=np.float32) # [found, % found, returned, % returned]
     history = np.zeros(shape=(steps,4), dtype=np.float32) # [active ants, remaining food %, disparity, collect food %]
 
     for step in range(steps):
@@ -416,9 +416,9 @@ def no_grid(grid_size, grid_marks, nest_loc, food_num, food_locs, food_step, ant
 
         # tracks active ants and remaining food and disparity
         history[step, 0] = ants_act # history of active ants
-        history[step, 1] = food_found[step, 0] # history of found food
-        history[step, 2] = food_found[step, 1]-food_found[step, 3] # history of disparity
-        history[step, 3] = food_found[step, 2] # history of collected food percentage
+        history[step, 1] = food_found[1] # history of found food
+        history[step, 2] = food_found[1]-food_found[3] # history of disparity
+        history[step, 3] = food_found[3] # history of collected food percentage
 
         if (ants_act == 0) or (food_found[3] >= 100): # breaks out of the loop if the simulation is finished
             break
@@ -832,8 +832,8 @@ def main():
             plt.legend()
             plt.show()
 
-main()
+#main()
 #alpha(100)
-#mean_steps()
+mean_steps()
 #nants(50,300,50)
 #alpha_plot(100)
