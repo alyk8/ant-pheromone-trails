@@ -1,7 +1,7 @@
 # Ant Pheromone Trail Simulation
 
 A Python simulation of emergent ant foraging behaviour using the **Active Random Walker** model (Schweitzer, Lao & Family, 1997). Ants perform a biased random walk from a central nest, depositing pheromone markers that decay over time. Trunk trails between the nest and food sources emerge from the collective dynamics — no explicit trail-following is hard-coded.
-<img width="1397" height="815" alt="image" src="https://github.com/user-attachments/assets/6811b315-9f28-4f75-b11a-def8c4e6cb8d" />
+<img width="800" height="458" alt="sim" src="https://github.com/user-attachments/assets/231167e6-f1ed-465b-bb71-ca270a960b8b" />
 
 ---
 
